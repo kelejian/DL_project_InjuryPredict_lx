@@ -1,13 +1,15 @@
 ''' This module includes data precessing dataset creating. '''
-# 2024.12.19
+# 2025.01.04
 
 import os
 import torch
+from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
+from sklearn.preprocessing import LabelEncoder
 import random
 import numpy as np
 import warnings
-
+warnings.filterwarnings("ignore")
 # Define the random seed.
 #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 seed = 123
@@ -17,12 +19,54 @@ torch.cuda.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
 
+class SigmoidTransform(nn.Module):
+    """
+    对标签值HIC进行 Sigmoid 变换和反变换。感兴趣范围被映射到[sigmoid(-2), sigmoid(2)]
+    """
+    def __init__(self, lower_bound, upper_bound):
+        """
+        初始化 SigmoidTransform。
+        
+        参数:
+            lower_bound (float): 感兴趣范围的下界(如200)。
+            upper_bound (float): 感兴趣范围的上界(如2000)。
+        """
+        super(SigmoidTransform, self).__init__()
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+        self.a = 4 / (upper_bound - lower_bound)  # 缩放因子
+        self.b = -2 - self.a * lower_bound        # 偏移量
+
+    def forward(self, y):
+        """
+        对标签值进行 Sigmoid 变换。
+        
+        参数:
+            y (torch.Tensor): 输入标签值，形状为(B,)。
+        
+        返回:
+            torch.Tensor: 变换后的标签值，形状为(B,)。
+        """
+        return torch.sigmoid(self.a * y + self.b) 
+
+    def inverse(self, y_transformed):
+        """
+        对 Sigmoid 变换后的标签值进行反变换。
+        
+        参数:
+            y_transformed (torch.Tensor): 变换后的标签值，形状为(B,)。
+        
+        返回:
+            torch.Tensor: 反变换后的标签值，形状为(B,)。
+        """
+        return (torch.log(y_transformed / (1 - y_transformed)) - self.b) / self.a
+
 # 经验公式计算AIS
 def AIS_3_cal(HIC):
     AIS_3 = []
     for i in range(len(HIC)):
         hic = np.zeros(3)
-        _HIC = min(max(HIC[i], 1), 2000)  # 限制上下界，防止数值不稳定
+        _HIC = min(max(HIC[i], 1), 2000)  # 限制上下界, 防止数值不稳定
         hic[0] = 1. / (1 + np.exp(1.54 + 200 / _HIC - 0.00650 * _HIC))  # AIS≥1的公式
         hic[1] = 1. / (1 + np.exp(3.39 + 200 / _HIC - 0.00372 * _HIC))  # AIS≥3的公式
         hic_i = int(2)
@@ -40,7 +84,7 @@ def AIS_cal(HIC, prob_output=False):
     for i in range(len(HIC)):
         hic = np.zeros(5)
         ais_prob = np.zeros(6)
-        _HIC = min(max(HIC[i], 1), 2000)  # 限制上下界，防止数值不稳定
+        _HIC = min(max(HIC[i], 1), 2000)  # 限制上下界, 防止数值不稳定
         hic[0] = 1. / (1 + np.exp(1.54 + 200 / _HIC - 0.00650 * _HIC))  # P(AIS≥1)
         ais_prob[0] =  1 - hic[0] # AIS=0的概率
 
@@ -72,39 +116,88 @@ def AIS_cal(HIC, prob_output=False):
         return np.array(AIS)
 
 class CrashDataset(Dataset):
-    def __init__(self, acc_file='./data/data_crashpulse.npy', att_file='./data/data_features.npy', transform=None):
+    def __init__(self, acc_file='./data/data_crashpulse.npy', att_file='./data/data_features.npy', y_transform=None):
         """
         Args:
             acc_file (str): 碰撞波形数据的文件路径 (x_acc)。
             att_file (str): 特征数据的文件路径 (x_att)。
-            transform (callable, optional): 可选的数据变换。
+            y_transform (callable, optional): 可选是否对标签HIC值进行变换。默认为 None。
         """
         self.x_acc = np.load(acc_file)  # 加载碰撞波形数据  npdarray (5777, 2, 150)
         self.x_att = np.load(att_file)  # 加载其他特征数据  npdarray (5777, 9)
-        
-        # 数据预处理：归一化、离散化等
-        self.x_acc[:, 0] = np.round((self.x_acc[:, 0] - self.x_acc[:, 0].min()) / (self.x_acc[:, 0].max() - self.x_acc[:, 0].min()) * 199) # X方向碰撞波形
-        self.x_acc[:, 1] = np.round((self.x_acc[:, 1] - self.x_acc[:, 1].min()) / (self.x_acc[:, 1].max() - self.x_acc[:, 1].min()) * 199) # Y方向碰撞波形
+        self.continuous_indices = [0, 1, 3, 4]  # 连续特征的索引
+        self.discrete_indices = [2, 5, 6, 7]  # 离散特征的索引
 
-        self.x_att[:, 0] = np.round((self.x_att[:, 0] - self.x_att[:, 0].min()) / (self.x_att[:, 0].max() - self.x_att[:, 0].min()) * 29) # ego vehicle speed: 23.0~140.0km/h to 0~29(int)
-        self.x_att[:, 1] = np.round((self.x_att[:, 1] - self.x_att[:, 1].min()) / (self.x_att[:, 1].max() - self.x_att[:, 1].min()) * 19) # leading vehicle speed 10.0~120.0km/h to 0~19(int)
-        self.x_att[:, 2] = self.x_att[:, 2] - 1 # six types of collision Overlap rate: 1~6 to 0~5(int)
-        self.x_att[:, 3] = (self.x_att[:, 3] + 30) / 5 # collision angle: -30~30° to 0~12(int)
-        self.x_att[:, 4] = np.round((self.x_att[:, 4] - self.x_att[:, 4].min()) / (self.x_att[:, 4].max() - self.x_att[:, 4].min()) * 5) # Mass of the leading vehicle: 900.0-3900.0kg to 0-5(int)
-        # 剩余的x_att[:, 5]-x_att[:, 7]:Belt usage(0,1), Airbag usage(0,1), Occupant size(0,1,2) 本就为离散变量，无需处理
+        # 初始化 LabelEncoder 和映射关系存储
+        self.label_encoders = {}  # 存储每个离散特征的 LabelEncoder
+        self.encoding_mappings = {}  # 存储每个离散特征的编码映射关系
+
+        # 数据预处理
+        self._preprocess_data()
 
         # 目标变量
-        self.y_HIC = self.x_att[:, 8]
-        self.y_AIS = AIS_cal(self.y_HIC)
+        self.y_HIC = self.x_att[:, 8]  # HIC 值
+        self.y_AIS = AIS_cal(self.y_HIC)  # 计算 AIS-6C 值
 
         # 实际输入特征
         self.x_att = self.x_att[:, :8]
 
-        self.transform = transform
+        # 存储每个离散特征的类别数
+        self.num_classes_of_discrete = [
+            len(self.label_encoders[idx].classes_) for idx in self.discrete_indices]
+
+        self.y_transform = y_transform
+
+    def _preprocess_data(self):
+        """
+        数据预处理, 分别处理连续特征和离散特征
+        """
+        # 碰撞波形数据 (x_acc)
+        # 形状 (5777, 2, 150)，2 表示 X 和 Y 方向，150 表示时间步长
+        # 对 X 和 Y 方向的波形数据进行归一化
+        for i in range(2):  # 分别处理 X 和 Y 方向
+            min_val = np.min(self.x_acc[:, i])
+            max_val = np.max(self.x_acc[:, i])
+            self.x_acc[:, i] = (self.x_acc[:, i] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+
+        # 特征数据 (x_att)
+        # 形状 (5777, 9)，9 个特征，包括连续和离散变量
+        # 特征索引及含义：
+        # 0: ego vehicle speed (连续): 23.0~140.0km/h
+        # 1: leading vehicle speed (连续): 10.0~120.0km/h
+        # 2: collision overlap rate (离散，0~6)
+        # 3: collision angle (连续): -30~30°
+        # 4: mass of the leading vehicle (连续): 900.0-3900.0kg
+        # 5: belt usage (离散，0/1)
+        # 6: airbag usage (离散，0/1)
+        # 7: occupant size (离散，0/1/2)
+        # 8: HIC (连续，目标变量): 0~ >2000
+
+        # 处理连续特征
+        for idx in self.continuous_indices:
+            min_val = np.min(self.x_att[:, idx])
+            max_val = np.max(self.x_att[:, idx])
+            self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+
+        # 处理离散特征
+        for idx in self.discrete_indices:
+            le = LabelEncoder()
+            self.x_att[:, idx] = le.fit_transform(self.x_att[:, idx])  # 转换为从 0 开始的整数
+            self.label_encoders[idx] = le  # 存储 LabelEncoder
+            self.encoding_mappings[idx] = dict(zip(le.classes_, le.transform(le.classes_)))  # 存储编码映射关系
+
+    def print_encoding_mappings(self):
+        """
+        打印离散特征的编码映射关系。
+        """
+        for idx, mapping in self.encoding_mappings.items():
+            print(f"Feature {idx} encoding mapping: {mapping}")
 
     def Loss_expect_cal(self):
-        # 后续HIC对应MSEloss，AIS对应Classification loss, 此处分别计算二者的期望，设HIC_pred和HIC_true独立同分布, AIS_pred和AIS_true独立同分布
-
+        """
+        后续HIC对应MSEloss, AIS对应Classification loss, 此处分别计算二者的期望:
+        设HIC_pred和HIC_true独立同分布, AIS_pred和AIS_true独立同分布
+        """
         _HIC = np.clip(self.y_HIC, 0, 2500) # 裁剪HIC
         MSEloss_expect = 2 * np.std(_HIC) ** 2 # E((HIC_pred - HIC_true)^2) = 2 * HIC_std^2 
 
@@ -118,22 +211,28 @@ class CrashDataset(Dataset):
         return len(self.x_acc)
 
     def __getitem__(self, idx):
-        # 根据索引获取数据
-        x_acc = self.x_acc[idx]
-        x_att = self.x_att[idx]
-        y_HIC = self.y_HIC[idx]
-        y_AIS = self.y_AIS[idx]
-        
-        # 数据变换（如果需要）
-        if self.transform:
-            x_acc = self.transform(x_acc)
-            x_att = self.transform(x_att)
+        """
+        根据索引获取数据。
+        """
+        x_acc = self.x_acc[idx]  # 碰撞波形数据，形状 (2, 150)
+        x_att = self.x_att[idx]  # 特征数据，形状 (8,)
+        y_HIC = self.y_HIC[idx]  # HIC 值，标量
+        y_AIS = self.y_AIS[idx]  # AIS 值，标量
 
-        # 返回数据
-        return torch.tensor(x_acc, dtype=torch.long), \
-            torch.tensor(x_att, dtype=torch.long), \
-            torch.tensor(y_HIC, dtype=torch.float32), \
-            torch.tensor(y_AIS, dtype=torch.long)
+        x_att_continuous = x_att[self.continuous_indices]  # 连续特征，形状 (4,)
+        x_att_discrete = x_att[self.discrete_indices]      # 离散特征，形状 (4,)
+        
+        # 如果提供了标签变换函数，则对标签进行变换
+        if self.y_transform is not None:
+            y_HIC = self.y_transform(y_HIC)
+
+        return (
+            torch.tensor(x_acc, dtype=torch.float32),          # 碰撞波形数据，float32
+            torch.tensor(x_att_continuous, dtype=torch.float32),  # 连续特征，float32
+            torch.tensor(x_att_discrete, dtype=torch.long),       # 离散特征，long
+            torch.tensor(y_HIC, dtype=torch.float32),          # HIC 值，float32
+            torch.tensor(y_AIS, dtype=torch.long)              # AIS 值，long
+        )
 
 if __name__ == '__main__':
     import time
@@ -151,15 +250,13 @@ if __name__ == '__main__':
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
+
+    dataset.print_encoding_mappings()
     
     batch_start_time = time.time()
     for i, batch in enumerate(train_loader):
         
-        x_acc, x_att, y_HIC, y_AIS = batch
-        if i == 0:
-            print("x_acc shape:", x_acc.shape)
-            print("x_att shape:", x_att.shape)
-            print("x_att前四行的后三列", x_att[:8, 5:])
-            print("y_HIC shape:", y_HIC.shape)
-            print("y_AIS shape:", y_AIS.shape)
+        x_acc, x_att_continuous, x_att_discrete, y_HIC, y_AIS = batch
+        print(x_acc.shape, x_att_continuous.shape, x_att_discrete.shape, y_HIC.shape, y_AIS.shape)
+        break
     print("batch time:", time.time() - batch_start_time)
