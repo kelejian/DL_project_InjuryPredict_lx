@@ -64,58 +64,58 @@ class SigmoidTransform(nn.Module):
 
 # 经验公式计算AIS
 def AIS_3_cal(HIC):
-    AIS_3 = []
-    for i in range(len(HIC)):
-        hic = np.zeros(3)
-        _HIC = min(max(HIC[i], 1), 2000)  # 限制上下界, 防止数值不稳定
-        hic[0] = 1. / (1 + np.exp(1.54 + 200 / _HIC - 0.00650 * _HIC))  # AIS≥1的公式
-        hic[1] = 1. / (1 + np.exp(3.39 + 200 / _HIC - 0.00372 * _HIC))  # AIS≥3的公式
-        hic_i = int(2)
-        while hic[int(hic_i - 1)] < 0.2: # 0.2为经验的概率阈值
-            hic_i = hic_i - 1
-            if hic_i == 0:
-                break
-
-        AIS_3.append(hic_i)
-    return np.array(AIS_3)
+    HIC = np.clip(HIC, 1, 2000)
+    coefficients = np.array([
+        [1.54, 0.00650],  # P(AIS≥1)
+        [3.39, 0.00372]   # P(AIS≥3)
+    ])
+    threshold = 0.2
+    c1 = coefficients[:, 0].reshape(-1, 1)
+    c2 = coefficients[:, 1].reshape(-1, 1)
+    HIC_inv = 200 / HIC
+    hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC))
+    AIS_3 = np.sum(hic_prob.T >= threshold, axis=1)
+    return AIS_3
 
 def AIS_cal(HIC, prob_output=False):
-    AIS = []
-    AIS_prob = []
-    for i in range(len(HIC)):
-        hic = np.zeros(5)
-        ais_prob = np.zeros(6)
-        _HIC = min(max(HIC[i], 1), 2000)  # 限制上下界, 防止数值不稳定
-        hic[0] = 1. / (1 + np.exp(1.54 + 200 / _HIC - 0.00650 * _HIC))  # P(AIS≥1)
-        ais_prob[0] =  1 - hic[0] # AIS=0的概率
+    # 限制 HIC 范围，防止数值不稳定
+    HIC = np.clip(HIC, 1, 2000)
 
-        hic[1] = 1. / (1 + np.exp(2.49 + 200 / _HIC - 0.00483 * _HIC))  # P(AIS≥2)
-        ais_prob[1] = hic[0] - hic[1] # AIS=1的概率
+    # 定义常量和系数
+    coefficients = np.array([
+        [1.54, 0.00650],  # P(AIS≥1)
+        [2.49, 0.00483],  # P(AIS≥2)
+        [3.39, 0.00372],  # P(AIS≥3)
+        [4.90, 0.00351],  # P(AIS≥4)
+        [7.82, 0.00429]   # P(AIS≥5)
+    ])
+    threshold = 0.2  # 经验概率阈值
 
-        hic[2] = 1. / (1 + np.exp(3.39 + 200 / _HIC - 0.00372 * _HIC))  # P(AIS≥3)
-        ais_prob[2] = hic[1] - hic[2] # AIS=2的概率
+    # 计算 P(AIS≥n) 的概率（向量化计算）
+    c1 = coefficients[:, 0].reshape(-1, 1)  # 系数1
+    c2 = coefficients[:, 1].reshape(-1, 1)  # 系数2
+    HIC_inv = 200 / HIC  # HIC 的倒数部分
 
-        hic[3] = 1. / (1 + np.exp(4.90 + 200 / _HIC - 0.00351 * _HIC))  # P(AIS≥4)
-        ais_prob[3] = hic[2] - hic[3] # AIS=3的概率
+    # 计算所有 P(AIS≥n)
+    hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC))
 
-        hic[4] = 1. / (1 + np.exp(7.82 + 200 / _HIC - 0.00429 * _HIC))  # P(AIS≥5)
-        ais_prob[4] = hic[3] - hic[4] # AIS=4的概率
+    # 计算 P(AIS=n) 的概率
+    ais_prob = np.zeros((len(HIC), 6))  # 初始化 (样本数, 6)
+    ais_prob[:, 0] = 1 - hic_prob[0]  # P(AIS=0)
+    ais_prob[:, 1] = hic_prob[0] - hic_prob[1]  # P(AIS=1)
+    ais_prob[:, 2] = hic_prob[1] - hic_prob[2]  # P(AIS=2)
+    ais_prob[:, 3] = hic_prob[2] - hic_prob[3]  # P(AIS=3)
+    ais_prob[:, 4] = hic_prob[3] - hic_prob[4]  # P(AIS=4)
+    ais_prob[:, 5] = hic_prob[4]  # P(AIS=5)
 
-        ais_prob[5] = hic[4]
+    # 确定 AIS 等级
+    AIS = np.sum(hic_prob.T >= threshold, axis=1)
 
-        hic_i = int(5)
-        while hic[int(hic_i - 1)] < 0.2 : # 0.2为经验的概率阈值
-            hic_i = hic_i - 1
-            if hic_i == 0:
-                break
-
-        AIS.append(hic_i)
-        AIS_prob.append(ais_prob)
     if prob_output:
-        return np.array(AIS), np.array(AIS_prob)
+        return AIS, ais_prob
     else:
-        return np.array(AIS)
-
+        return AIS
+    
 class CrashDataset(Dataset):
     def __init__(self, acc_file='./data/data_crashpulse.npy', att_file='./data/data_features.npy', y_transform=None):
         """
