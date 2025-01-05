@@ -1,4 +1,3 @@
-# %%
 import torch
 import torch.nn as nn
 import torch.onnx
@@ -7,6 +6,7 @@ from torchviz import make_dot
 import onnx
 import onnxruntime
 
+#@ profile
 def test_model(
     model, 
     inputs, 
@@ -104,6 +104,7 @@ def test_model(
         opset_version=11,
     )
     print(f"✔ ONNX 模型已保存至 {onnx_file_path}")
+    print("在 https://netron.app/ 上查看 ONNX 模型结构")
 
     # 验证 ONNX 模型
     print("\n============== 验证 ONNX 模型 ==============")
@@ -122,42 +123,32 @@ def test_model(
 
 # 示例用法
 if __name__ == "__main__":
-    from utils import models
+    from utils.models import TeacherModel  # 导入最新版的教师模型
 
     # 模型实例化
-    embed_size = 128
-    num_channels = [256, 256, 256, 256, 128]
-    kernel_size = 4
-    dropout = 0.3
-    #model = models.teacher_model(embed_size, num_channels, kernel_size, dropout=dropout).cuda()
-    model = models.student_model(embed_size).cuda()
+    num_classes_of_discrete = [7, 2, 2, 3]  # 离散特征的类别数
+    model = TeacherModel(num_classes_of_discrete).cuda()  # 使用最新版的教师模型
 
-    # 示例输入数据
-    batch_size = 4
+    # 示例输入数据（模拟数据集第1个batch）
+    batch_size = 128
     time_steps = 150
 
     # x_acc 输入，形状 (batch_size, 2, time_steps)
-    x_acc = torch.randint(0, 200, (batch_size, 2, time_steps), dtype=torch.long).cuda()
+    x_acc = torch.randn(batch_size, 2, time_steps).cuda()  # 随机生成加速度曲线数据
 
-    # x_att 输入，形状 (batch_size, 8)
-    x_att = torch.cat([
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 30,  # ego vehicle speed (0~29)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 20,  # leading vehicle speed (0~19)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 6,   # collision overlap rate (0~5)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 13,  # collision angle (0~12)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 6,   # leading vehicle mass (0~5)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 2,   # Belt usage (0, 1)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 2,   # Airbag usage (0, 1)
-        torch.arange(0, batch_size, dtype=torch.long).unsqueeze(1) % 3    # Occupant size (0, 1, 2)
-    ], dim=1).cuda()
+    # x_att_continuous 输入，形状 (batch_size, 4)
+    x_att_continuous = torch.randn(batch_size, 4).cuda()  # 随机生成连续特征
 
-    print(x_att.shape)  # 验证形状
+    # x_att_discrete 输入，形状 (batch_size, 4)
+    x_att_discrete = torch.cat([
+        torch.randint(0, 7, (batch_size, 1)),  # collision overlap rate (0~6)
+        torch.randint(0, 2, (batch_size, 1)),  # belt usage (0/1)
+        torch.randint(0, 2, (batch_size, 1)),  # airbag usage (0/1)
+        torch.randint(0, 3, (batch_size, 1))   # occupant size (0/1/2)
+    ], dim=1).cuda()  # 随机生成离散特征
 
     # 模拟真实标签
-    y_HIC = torch.randn(batch_size).cuda()
-    print(x_att[:,5:])
+    y_HIC = torch.randn(batch_size, 1).cuda()  # 随机生成 HIC 标签
 
-    #test_model(model, inputs=(x_acc, x_att[:,5:]), labels=y_HIC)
-    test_model(model, inputs= x_att, labels=y_HIC)
-    
-
+    # 测试模型
+    test_model(model, inputs=(x_acc, x_att_continuous, x_att_discrete), labels=y_HIC)

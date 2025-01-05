@@ -22,6 +22,7 @@ random.seed(seed)
 class SigmoidTransform(nn.Module):
     """
     对标签值HIC进行 Sigmoid 变换和反变换。感兴趣范围被映射到[sigmoid(-2), sigmoid(2)]
+    相当于隐性地为不同HIC的样本在训练中加权, 同时兼顾数值稳定性。
     """
     def __init__(self, lower_bound, upper_bound):
         """
@@ -154,6 +155,7 @@ class CrashDataset(Dataset):
         """
         # 碰撞波形数据 (x_acc)
         # 形状 (5777, 2, 150)，2 表示 X 和 Y 方向，150 表示时间步长
+        # 可能存在噪声，不够平滑
         # 对 X 和 Y 方向的波形数据进行归一化
         for i in range(2):  # 分别处理 X 和 Y 方向
             min_val = np.min(self.x_acc[:, i])
@@ -224,7 +226,7 @@ class CrashDataset(Dataset):
         
         # 如果提供了标签变换函数，则对标签进行变换
         if self.y_transform is not None:
-            y_HIC = self.y_transform(y_HIC)
+            y_HIC = self.y_transform(torch.tensor(y_HIC, dtype=torch.float32))
 
         return (
             torch.tensor(x_acc, dtype=torch.float32),          # 碰撞波形数据，float32

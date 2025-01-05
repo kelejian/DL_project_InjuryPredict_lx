@@ -1,0 +1,31 @@
+{
+    "hyperparameters related to training": {
+        "Epochs": 500,
+        "Batch_size": 64,
+        "Learning_rate": 0.005,
+        "Learning_rate_min": 1e-06,
+        "weight_decay": 0.0001,
+        "Patience": 5,
+        "HIC_transform": {
+            "lower_bound": 0,
+            "upper_bound": 2500
+        }
+    },
+    "hyperparameters related to model": {
+        "num_blocks_of_tcn": 4,
+        "num_layers_of_mlpE": 4,
+        "num_layers_of_mlpD": 4,
+        "mlpE_hidden": 128,
+        "mlpD_hidden": 96,
+        "encoder_output_dim": 128,
+        "decoder_output_dim": 16,
+        "dropout": 0.1
+    },
+    "results": {
+        "final_epoch": 328,
+        "Best_accu": 83.6,
+        "Best_mae": 30172.296875,
+        "last_val_accuracy": 79.80000000000001,
+        "last_val_mae": 30220.51953125
+    }
+}
