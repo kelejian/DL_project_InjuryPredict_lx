@@ -10,9 +10,10 @@ import numpy as np
 from torch import nn
 from torch.utils.data import  DataLoader, random_split
 import torch.optim as optim
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score, root_mean_squared_error
+from sklearn.metrics import mean_absolute_error, mean_squared_error,  root_mean_squared_error
 
 from utils import models
+from utils.weighted_loss import weighted_loss
 from utils.dataset_prepare import SigmoidTransform, CrashDataset, AIS_cal, AIS_3_cal
 
 #import wandb
@@ -144,31 +145,41 @@ if __name__ == "__main__":
 
     # 定义优化相关的超参数
     Epochs = 500
-    Batch_size = 64
+    Batch_size = 128
     Learning_rate = 0.005 # 初始学习率
-    Learning_rate_min = 1e-6 # 余弦退火最小学习率
-    weight_decay = 0.0001 # L2 正则化系数
-    Patience = 5 # 早停等待轮数
-
+    Learning_rate_min = 1e-5 # 余弦退火最小学习率
+    weight_decay = 0.001 # L2 正则化系数
+    Patience = 8 # 早停等待轮数
+    weighted_loss_factor = 1.10 # 加权损失函数的系数
+    base_loss = "mse" # 或 "mae"
     # 定义模型相关的超参数
     num_blocks_of_tcn = 4  # TCN 的块数
     num_layers_of_mlpE = 4  # MLP 编码器的层数
     num_layers_of_mlpD = 4  # MLP 解码器的层数
-    mlpE_hidden = 128  # MLP 编码器的隐藏层维度
-    mlpD_hidden = 96  # MLP 解码器的隐藏层维度
-    encoder_output_dim = 128  # 编码器输出特征维度
+    mlpE_hidden = 96  # MLP 编码器的隐藏层维度
+    mlpD_hidden = 64  # MLP 解码器的隐藏层维度
+    encoder_output_dim = 64  # 编码器输出特征维度
     decoder_output_dim = 16  # 解码器输出特征维度
-    dropout = 0.1 # Dropout 概率
+    dropout = 0.2 # Dropout 概率
+    # 是否使用 HIC 标签变换对象
+    HIC_transform = None  # HIC 标签变换对象 或 SigmoidTransform(lower_bound=0, upper_bound=2500)
+
 
     # 设定数据集大小
     train_size = 5000
     val_size = 500
 
     # 加载标签变换对象和数据集
-    HIC_transform = SigmoidTransform(lower_bound=0, upper_bound=2500)
     dataset = CrashDataset(y_transform=HIC_transform)
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, len(dataset) - train_size - val_size])
-    torch.save(train_dataset, "./data/train_dataset.pt"), torch.save(val_dataset, "./data/val_dataset.pt"), torch.save(test_dataset, "./data/test_dataset.pt")
+    if HIC_transform is not None:
+        torch.save(train_dataset, "./data/train_dataset_hic_ytrans.pt")
+        torch.save(val_dataset, "./data/val_dataset_hic_ytrans.pt")
+        torch.save(test_dataset, "./data/test_dataset_hic_ytrans.pt")
+    else:
+        torch.save(train_dataset, "./data/train_dataset.pt")
+        torch.save(val_dataset, "./data/val_dataset.pt")
+        torch.save(test_dataset, "./data/test_dataset.pt")
 
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=Batch_size, shuffle=False, num_workers=0)
@@ -189,7 +200,7 @@ if __name__ == "__main__":
         dropout=dropout
     ).to(device)
 
-    criterion = nn.MSELoss().to(device)
+    criterion = weighted_loss(base_loss, weighted_loss_factor).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=Learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=Epochs, eta_min=Learning_rate_min)
 
@@ -231,7 +242,7 @@ if __name__ == "__main__":
         # 保存 MAE 最佳的模型
         if val_mae < Best_mae:
             Best_mae = val_mae
-            if Best_mae < 500:
+            if Best_mae < 200:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_mae.pth"))
                 print(f"Best model saved with val MAE: {Best_mae:.1f}")
 
@@ -276,12 +287,17 @@ if __name__ == "__main__":
             "last_val_mae": float(val_mae),  # 转换为 float
         }
     }
+
+    if isinstance(criterion, weighted_loss):
+        results["hyperparameters related to training"]["weighted_loss_factor"] = weighted_loss_factor
+        results["hyperparameters related to training"]["base_loss"] = base_loss
+
     if dataset.y_transform is not None:
         results["hyperparameters related to training"]["HIC_transform"] = {
             "lower_bound": dataset.y_transform.lower_bound,
             "upper_bound": dataset.y_transform.upper_bound,
         }
-        
+
     with open(os.path.join(run_dir, "TrainingRecord.json"), "w") as f:
         json.dump(results, f, indent=4)
 
