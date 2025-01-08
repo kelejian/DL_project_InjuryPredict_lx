@@ -85,8 +85,8 @@ if __name__ == "__main__":
     # 解析命令行参数
     import argparse
     parser = argparse.ArgumentParser(description="Test Teacher or Student Model")
-    parser.add_argument("--run_dir", type=str, required=True, help="Path to the run directory containing the model and training record (e.g., .\\runs\\TeacherModel_Train_01081257).")
-    parser.add_argument("--weight_file", type=str, default="teacher_best_mae.pth" , help="Name of the model weight file (e.g., teacher_best_accu.pth).")
+    parser.add_argument("--run_dir", '-r', type=str, default="./runs/StudentModel_Baseline_01081637")
+    parser.add_argument("--weight_file", '-w', type=str, default="student_best_mae.pth")
     args = parser.parse_args()
 
     # 加载超参数和训练记录
@@ -95,9 +95,6 @@ if __name__ == "__main__":
 
     # 提取模型相关的超参数
     model_params = training_record["hyperparameters related to model"]
-    Ksize_init = model_params["Ksize_init"]
-    Ksize_mid = model_params["Ksize_mid"]
-    num_blocks_of_tcn = model_params.get("num_blocks_of_tcn", None)  # 仅教师模型需要
     num_layers_of_mlpE = model_params["num_layers_of_mlpE"]
     num_layers_of_mlpD = model_params["num_layers_of_mlpD"]
     mlpE_hidden = model_params["mlpE_hidden"]
@@ -136,6 +133,9 @@ if __name__ == "__main__":
 
     # 判断是教师模型还是学生模型
     if "teacher" in args.weight_file.lower():
+        Ksize_init = model_params["Ksize_init"]
+        Ksize_mid = model_params["Ksize_mid"]
+        num_blocks_of_tcn = model_params.get("num_blocks_of_tcn", None)  # 仅教师模型需要
         # 加载教师模型
         model = models.TeacherModel(
         Ksize_init=Ksize_init,

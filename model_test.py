@@ -127,8 +127,8 @@ if __name__ == "__main__":
 
     # 模型实例化
     num_classes_of_discrete = [7, 2, 2, 3]  # 离散特征的类别数
-    #model = TeacherModel(num_classes_of_discrete).cuda()
-    model = StudentModel(num_classes_of_discrete).cuda()
+    Teachermodel = TeacherModel(num_classes_of_discrete).cuda()
+    Studentmodel = StudentModel(num_classes_of_discrete).cuda()
 
     # 示例输入数据（模拟数据集第1个batch）
     batch_size = 128
@@ -152,4 +152,5 @@ if __name__ == "__main__":
     y_HIC = torch.randn(batch_size).cuda()  # 随机生成 HIC 标签
 
     # 测试模型
-    test_model(model, inputs=( x_att_continuous, x_att_discrete), labels=y_HIC)
+    test_model(Teachermodel, inputs=(x_acc, x_att_continuous, x_att_discrete), labels=y_HIC)
+    test_model(Studentmodel, inputs=(x_att_continuous, x_att_discrete), labels=y_HIC)
