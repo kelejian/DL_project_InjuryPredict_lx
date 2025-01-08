@@ -1,4 +1,4 @@
-''' This module defines a weighted loss function . '''
+''' This module defines a weighted loss function. '''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,41 +11,38 @@ def Piecewise_linear(y_true, y_pred, weight_add_mid=1.0):
 
     参数:
         y_true (torch.Tensor): 真实标签，形状为 (B,)。
-        weight_add_mid (float): 中间区间 [150, 1600] 的权重增加量
+        y_pred (torch.Tensor): 预测值，形状为 (B,)。
+        weight_add_mid (float): 中间区间的权重增加量。
 
     返回:
         weight_adds (torch.Tensor): 权重增加量，形状与 y_true 相同。
     """
     # 初始化权重增加量为 0
     weight_adds = torch.zeros_like(y_true)
-    # 区间 1: 0 <= y <= 100，权重增加量为 0
-    mask_0_100 = (y_true >= 0) & (y_true <= 100)
-    weight_adds[mask_0_100] = 0
-    # 区间 2: 100 < y < 150，线性递增，斜率为 weight_add_mid / 50
-    mask_100_150 = (y_true > 100) & (y_true < 150)
-    weight_adds[mask_100_150] = (weight_add_mid / 50) * (y_true[mask_100_150] - 100)
-    # 区间 3: 150 <= y <= 1600，权重增加量为 weight_add_mid
-    mask_150_1600 = (y_true >= 150) & (y_true <= 1600)
-    weight_adds[mask_150_1600] = weight_add_mid
-    # 区间 4: 1600 < y < 1800，线性递减，斜率为 -weight_add_mid / 200
-    mask_1600_1800 = (y_true > 1600) & (y_true < 1800)
-    weight_adds[mask_1600_1800] = weight_add_mid + (-weight_add_mid / 200) * (y_true[mask_1600_1800] - 1600)
-    # 区间 5: 1800 <= y <= 2500，权重增加量为 0
-    mask_1800_2500 = (y_true >= 1800) & (y_true <= 2500)
-    weight_adds[mask_1800_2500] = 0
-    # 区间 6: y > 2500，权重减少
-    mask_2500_plus = y_true > 2500
-    weight_adds[mask_2500_plus] = -1 + torch.exp(-5e-4 * (y_true[mask_2500_plus] - 2500))
+    # 区间 1: 0 <= y <= 150，线性递增至weight_add_mid
+    mask = (y_true >= 0) & (y_true < 150)
+    weight_adds[mask] = (weight_add_mid / 150) * (y_true[mask] - 0)
+    # 区间 2: 150 <= y <= 1600，权重增加量为 weight_add_mid
+    mask = (y_true >= 150) & (y_true <= 1600)
+    weight_adds[mask] = weight_add_mid
+    # 区间 3: 1600 < y < 2000，线性递减，斜率为 -weight_add_mid / 400
+    mask = (y_true > 1600) & (y_true < 2000)
+    weight_adds[mask] = weight_add_mid + (-weight_add_mid / 400) * (y_true[mask] - 1600)
+    # 区间 4: 2000 <= y <= 2500，权重增加量为 0
+    mask = (y_true >= 2000) & (y_true <= 2500)
+    weight_adds[mask] = 0
+    # 区间 5: y > 2500，权重按指数减少
+    mask = y_true > 2500
+    weight_adds[mask] = -1 + torch.exp(-1e-4 * (y_true[mask] - 2500))
 
-    # 最后增加y_pred<0的权重惩罚, 线性递增，斜率绝对值为 weight_add_mid / 50
-    mask_pred_neg = y_pred < 0
-    weight_adds[mask_pred_neg] = (weight_add_mid / 50) * (-y_pred[mask_pred_neg])
+    # 最后增加y_pred<0的权重惩罚
+    # mask_pred_neg = y_pred < 0
+    # weight_adds[mask_pred_neg] += weight_add_mid
 
-    return weight_adds
+    return weight_adds# 生成 y_true 和 y_pred 的值
 
 class weighted_loss(nn.Module): 
     """
-    加权损失函数, 对分类错误的样本和中间HIC值的样本赋予更大的权重。
     """
     def __init__(self, base_loss="mse", weight_factor_classify=1.1, weight_factor_sample=1.0, y_transform=None):
         super(weighted_loss, self).__init__()

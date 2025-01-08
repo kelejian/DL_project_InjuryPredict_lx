@@ -173,21 +173,15 @@ if __name__ == "__main__":
     ############################################################################################
     ############################################################################################
 
-    # 设定数据集大小
-    train_size = 5000
-    val_size = 500
-
-    # 加载标签变换对象和数据集
+    # 加载数据集对象
     dataset = CrashDataset(y_transform=HIC_transform)
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, len(dataset) - train_size - val_size])
-    if HIC_transform is not None:
-        torch.save(train_dataset, "./data/train_dataset_hic_ytrans.pt")
-        torch.save(val_dataset, "./data/val_dataset_hic_ytrans.pt")
-        torch.save(test_dataset, "./data/test_dataset_hic_ytrans.pt")
+    # 从data文件夹直接加载数据集
+    if dataset.y_transform is None:
+        train_dataset = torch.load("./data/train_dataset.pt")
+        val_dataset = torch.load("./data/val_dataset.pt")
     else:
-        torch.save(train_dataset, "./data/train_dataset.pt")
-        torch.save(val_dataset, "./data/val_dataset.pt")
-        torch.save(test_dataset, "./data/test_dataset.pt")
+        train_dataset = torch.load("./data/train_dataset_ytrans.pt")
+        val_dataset = torch.load("./data/val_dataset_ytrans.pt")
 
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=Batch_size, shuffle=False, num_workers=0)

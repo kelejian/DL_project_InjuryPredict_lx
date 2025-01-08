@@ -47,12 +47,17 @@ def objective(trial):
     lower_bound = 0
     upper_bound = 2500
     HIC_transform = None  # HIC 标签变换对象 或 SigmoidTransform(lower_bound, upper_bound)
-    
-    # 加载数据集
+
+    # 加载数据集对象
     dataset = CrashDataset(y_transform=HIC_transform)
-    train_size = 5000
-    val_size = 500
-    train_dataset, val_dataset, _ = random_split(dataset, [train_size, val_size, len(dataset) - train_size - val_size])
+    # 从data文件夹直接加载数据集
+    if dataset.y_transform is None:
+        train_dataset = torch.load("./data/train_dataset.pt")
+        val_dataset = torch.load("./data/val_dataset.pt")
+    else:
+        train_dataset = torch.load("./data/train_dataset_ytrans.pt")
+        val_dataset = torch.load("./data/val_dataset_ytrans.pt")
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 

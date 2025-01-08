@@ -133,7 +133,7 @@ class DiscreteFeatureEmbedding(nn.Module):
         
         # 为每个离散特征创建嵌入层
         self.embedding_layers = nn.ModuleList([
-            nn.Embedding(num_classes, num_classes)  # 嵌入维度 = 类别数
+            nn.Embedding(num_classes, num_classes - 1)  # 嵌入维度 = 类别数 - 1
             for num_classes in num_classes_of_discrete
         ])
         
@@ -145,18 +145,18 @@ class DiscreteFeatureEmbedding(nn.Module):
             x_att_discrete (torch.Tensor): 离散特征张量,形状为 (B, num_discrete_features),B 是 batch size。
         
         返回:
-            torch.Tensor: 嵌入后的特征向量,形状为 (B, sum(num_classes_of_discrete))。
+            torch.Tensor: 嵌入后的特征向量,形状为 (B, sum(num_classes_of_discrete) - len(num_classes_of_discrete))。
         """
         embedded_features = []
         
         # 对每个离散特征进行嵌入
         for i, embedding_layer in enumerate(self.embedding_layers):
-            # 提取第 i 个离散特征 (B, ) -> (B, num_classes)
+            # 提取第 i 个离散特征 (B, ) -> (B, num_classes - 1)
             feature = x_att_discrete[:, i]
             embedded_feature = embedding_layer(feature)
             embedded_features.append(embedded_feature)
         
-        # 拼接所有嵌入后的特征 (B, sum(num_classes_of_discrete))
+        # 拼接所有嵌入后的特征 (B, sum(num_classes_of_discrete) - len(num_classes_of_discrete))
         output = torch.cat(embedded_features, dim=1)
         return output
 
@@ -199,7 +199,7 @@ class TeacherModel(nn.Module):
         # MLP 编码器，处理连续特征和离散特征的嵌入
         if num_layers_of_mlpE < 2:
             raise ValueError("num_layers_of_mlpE 必须大于等于 2")
-        mlp_encoder_input_dim = 4 + sum(num_classes_of_discrete)  # 连续特征 + 离散特征嵌入 
+        mlp_encoder_input_dim = 4 + sum(num_classes_of_discrete) - len(num_classes_of_discrete)  # 连续特征 + 离散特征嵌入 
         self.mlp_encoder = PygMLP(
             in_channels=mlp_encoder_input_dim, 
             hidden_channels=mlpE_hidden,
@@ -287,10 +287,10 @@ class TeacherModel(nn.Module):
         """
         # 1. 处理离散特征
         x_discrete_embedded = self.discrete_embedding(x_att_discrete) 
-        # (B, 4) -> (B, sum(num_classes_of_discrete))
+        # (B, 4) -> (B, sum(num_classes_of_discrete) - len(num_classes_of_discrete))
 
         # 2. 处理连续特征和离散特征的嵌入
-        x_features = torch.cat([x_att_continuous, x_discrete_embedded], dim=1) # (B, 4 + sum(num_classes_of_discrete))
+        x_features = torch.cat([x_att_continuous, x_discrete_embedded], dim=1) # (B, 4 + sum(num_classes_of_discrete) - len(num_classes_of_discrete))
         x_features_encoded = self.mlp_encoder(x_features) # (B, encoder_output_dim  // 2)
 
         # 3. 编码曲线特征x_acc
@@ -301,7 +301,7 @@ class TeacherModel(nn.Module):
         encoder_output = torch.cat([x_features_encoded, x_acc_encoded], dim=1) # (B, encoder_output_dim )
 
         # 5. 解码器输出
-        decoder_input = torch.cat([encoder_output, x_features], dim=1) # (B, encoder_output_dim  + 4 + sum(num_classes_of_discrete))
+        decoder_input = torch.cat([encoder_output, x_features], dim=1) # (B, encoder_output_dim  + 4 + sum(num_classes_of_discrete) - len(num_classes_of_discrete))
         decoder_input = self.bn1(decoder_input)
         decoder_input = self.leaky_relu1(decoder_input)
         decoder_output = self.mlp_decoder(decoder_input)  # (B, decoder_output_dim)
@@ -340,7 +340,7 @@ class StudentModel(nn.Module):
         # MLP 编码器，处理连续特征和离散特征的嵌入
         if num_layers_of_mlpE < 2:
             raise ValueError("num_layers_of_mlpE 必须大于等于 2")
-        mlp_encoder_input_dim = 4 + sum(num_classes_of_discrete)  # 连续特征 + 离散特征嵌入
+        mlp_encoder_input_dim = 4 + sum(num_classes_of_discrete) - len(num_classes_of_discrete)  # 连续特征 + 离散特征嵌入
         self.mlp_encoder = PygMLP(
             in_channels=mlp_encoder_input_dim, 
             hidden_channels=mlpE_hidden,
@@ -417,14 +417,14 @@ class StudentModel(nn.Module):
             decoder_output: 解码器的输出，形状为 (B, decoder_output_dim)。
         """
         # 1. 处理离散特征
-        x_discrete_embedded = self.discrete_embedding(x_att_discrete)  # (B, sum(num_classes_of_discrete))
+        x_discrete_embedded = self.discrete_embedding(x_att_discrete)  # (B, sum(num_classes_of_discrete) - len(num_classes_of_discrete))
 
         # 2. 处理连续特征和离散特征的嵌入
-        x_features = torch.cat([x_att_continuous, x_discrete_embedded], dim=1)  # (B, 4 + sum(num_classes_of_discrete))
+        x_features = torch.cat([x_att_continuous, x_discrete_embedded], dim=1)  # (B, 4 + sum(num_classes_of_discrete) - len(num_classes_of_discrete))
         encoder_output = self.mlp_encoder(x_features)  # (B, encoder_output_dim)
 
         # 3. 解码器输出
-        decoder_input = torch.cat([encoder_output, x_features], dim=1)  # (B, encoder_output_dim + 4 + sum(num_classes_of_discrete))
+        decoder_input = torch.cat([encoder_output, x_features], dim=1)  # (B, encoder_output_dim + 4 + sum(num_classes_of_discrete) - len(num_classes_of_discrete))
         decoder_input = self.bn1(decoder_input)
         decoder_input = self.leaky_relu1(decoder_input)
         decoder_output = self.mlp_decoder(decoder_input)  # (B, decoder_output_dim)

@@ -85,7 +85,7 @@ if __name__ == "__main__":
     # 解析命令行参数
     import argparse
     parser = argparse.ArgumentParser(description="Test Teacher or Student Model")
-    parser.add_argument("--run_dir", '-r', type=str, default="./runs/StudentModel_Baseline_01081637")
+    parser.add_argument("--run_dir", '-r', type=str, default="./runs/StudentModel_Baseline_01081644")
     parser.add_argument("--weight_file", '-w', type=str, default="student_best_mae.pth")
     args = parser.parse_args()
 
@@ -119,12 +119,13 @@ if __name__ == "__main__":
 
     # 加载数据集
     dataset = CrashDataset(y_transform=HIC_transform)
-    if HIC_transform is not None:
+    if dataset.y_transform is not None:
         test_dataset1 = torch.load("./data/val_dataset_ytrans.pt")
         test_dataset2 = torch.load("./data/test_dataset_ytrans.pt")
     else:
         test_dataset1 = torch.load("./data/val_dataset.pt")
         test_dataset2 = torch.load("./data/test_dataset.pt")
+        
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
 

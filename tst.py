@@ -278,3 +278,39 @@ plt.legend()
 plt.grid(True)
 plt.show()
 # %%
+import numpy as np
+import matplotlib.pyplot as plt
+
+# 加载数据
+x_acc = np.load('./data/data_crashpulse.npy')  # 形状为 (N=5777, 2, T=150)
+print(x_acc[0,0,50])
+# 提取 X 和 Y 方向的数据
+for i in range(2):  # 分别处理 X 和 Y 方向
+    min_val = np.min(x_acc[:, i])
+    max_val = np.max(x_acc[:, i])
+    x_acc[:, i] = (x_acc[:, i] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+x_direction = x_acc[:, 0, :]  # X 方向数据，形状为 (5777, 150)
+y_direction = x_acc[:, 1, :]  # Y 方向数据，形状为 (5777, 150)
+num_curves = 5  # 例如绘制 5 条曲线
+
+# 绘制 X 方向的曲线
+plt.figure(figsize=(10, 6))
+for i in range(num_curves):
+    plt.plot(x_direction[i], label=f'X Direction Curve {i+1}')
+plt.title('X Direction Curves')
+plt.xlabel('Time Step')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.show()
+
+# 绘制 Y 方向的曲线
+plt.figure(figsize=(10, 6))
+for i in range(num_curves):
+    plt.plot(y_direction[i], label=f'Y Direction Curve {i+1}')
+plt.title('Y Direction Curves')
+plt.xlabel('Time Step')
+plt.ylabel('Amplitude')
+plt.legend()
+plt.show()
+
+# %%
