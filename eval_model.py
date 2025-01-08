@@ -1,4 +1,4 @@
-""" Test the TCN-based post-crash injury prediction model, i.e., the teacher model. """
+""" Test the TCN-based post-crash injury prediction model """
 # -*- coding: utf-8 -*-
 
 import os, json
@@ -22,7 +22,7 @@ warnings.filterwarnings('ignore')
 
 # Define the random seed.
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-seed = 123
+seed = 2025
 torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 torch.cuda.manual_seed(seed)
@@ -32,6 +32,16 @@ random.seed(seed)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def test(model, loader, y_transform=None):
+    """
+    参数:
+        model: 模型实例。
+        loader: 数据加载器。
+        y_transform: 数据集中的HIC标签变换对象。若数据集中的HIC标签没有进行变换则为None。
+
+    返回:
+        HIC_preds: 预测的 HIC 值。
+        HIC_trues: 真实的 HIC 值。
+    """
     model.eval()
     all_HIC_preds = []
     all_HIC_trues = []
@@ -45,7 +55,10 @@ def test(model, loader, y_transform=None):
             batch_y_HIC = batch_y_HIC.to(device)
 
             # 前向传播
-            batch_pred_HIC, _, _ = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
+            if isinstance(model, models.TeacherModel):
+                batch_pred_HIC, _, _ = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
+            elif isinstance(model, models.StudentModel):
+                batch_pred_HIC, _, _ = model(batch_x_att_continuous, batch_x_att_discrete)
 
             # 如果使用了 y_transform，需要将HIC 值反变换回原始范围以计算指标
             if y_transform is not None:
@@ -59,25 +72,32 @@ def test(model, loader, y_transform=None):
     # 拼接所有 batch 的结果
     HIC_preds = np.concatenate(all_HIC_preds)
     HIC_trues = np.concatenate(all_HIC_trues)
+
     # 检查 HIC_preds 和 HIC_trues 是否包含 inf 或异常值
     if np.isinf(HIC_preds).any() or np.isinf(HIC_trues).any():
-        print("Warning: HIC_preds or HIC_trues contains inf values. Replacing inf with large finite values.")
-        HIC_preds = np.nan_to_num(HIC_preds, nan=0.0, posinf=1e6, neginf=-1e6)
-        HIC_trues = np.nan_to_num(HIC_trues, nan=0.0, posinf=1e6, neginf=-1e6)
+        print("**Warning: HIC_preds or HIC_trues contains inf values. Replacing inf with large finite values.**")
+        HIC_preds = np.nan_to_num(HIC_preds, nan=0.0, posinf=1e4, neginf=-1e4)
+        HIC_trues = np.nan_to_num(HIC_trues, nan=0.0, posinf=1e4, neginf=-1e4)
 
     return HIC_preds, HIC_trues
 
 if __name__ == "__main__":
-    # 指定 runs 文件夹路径
-    run_dir = "./runs/TeacherModel_Train_01051819"  # 替换为实际的 runs 文件夹路径
+    # 解析命令行参数
+    import argparse
+    parser = argparse.ArgumentParser(description="Test Teacher or Student Model")
+    parser.add_argument("--run_dir", type=str, required=True, help="Path to the run directory containing the model and training record (e.g., .\\runs\\TeacherModel_Train_01081257).")
+    parser.add_argument("--weight_file", type=str, default="teacher_best_mae.pth" , help="Name of the model weight file (e.g., teacher_best_accu.pth).")
+    args = parser.parse_args()
 
     # 加载超参数和训练记录
-    with open(os.path.join(run_dir, "TrainingRecord.json"), "r") as f:
+    with open(os.path.join(args.run_dir, "TrainingRecord.json"), "r") as f:
         training_record = json.load(f)
 
     # 提取模型相关的超参数
     model_params = training_record["hyperparameters related to model"]
-    num_blocks_of_tcn = model_params["num_blocks_of_tcn"]
+    Ksize_init = model_params["Ksize_init"]
+    Ksize_mid = model_params["Ksize_mid"]
+    num_blocks_of_tcn = model_params.get("num_blocks_of_tcn", None)  # 仅教师模型需要
     num_layers_of_mlpE = model_params["num_layers_of_mlpE"]
     num_layers_of_mlpD = model_params["num_layers_of_mlpD"]
     mlpE_hidden = model_params["mlpE_hidden"]
@@ -114,8 +134,12 @@ if __name__ == "__main__":
     # 设备设置
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # 加载模型
-    model = models.TeacherModel(
+    # 判断是教师模型还是学生模型
+    if "teacher" in args.weight_file.lower():
+        # 加载教师模型
+        model = models.TeacherModel(
+        Ksize_init=Ksize_init,
+        Ksize_mid=Ksize_mid,
         num_classes_of_discrete=dataset.num_classes_of_discrete,
         num_blocks_of_tcn=num_blocks_of_tcn,
         num_layers_of_mlpE=num_layers_of_mlpE,
@@ -126,9 +150,23 @@ if __name__ == "__main__":
         decoder_output_dim=decoder_output_dim,
         dropout=dropout
     ).to(device)
-
-    # 加载模型权重
-    model.load_state_dict(torch.load(os.path.join(run_dir, "teacher_best_accu.pth")))  # 或 teacher_best_mae.pth
+        
+    elif "student" in args.weight_file.lower():
+        # 加载学生模型
+        model = models.StudentModel(
+            num_classes_of_discrete=dataset.num_classes_of_discrete,
+            num_layers_of_mlpE=num_layers_of_mlpE,
+            num_layers_of_mlpD=num_layers_of_mlpD,
+            mlpE_hidden=mlpE_hidden,
+            mlpD_hidden=mlpD_hidden,
+            encoder_output_dim=encoder_output_dim,
+            decoder_output_dim=decoder_output_dim,
+            dropout=dropout
+        ).to(device)
+    else:
+        raise ValueError("Weight file name must contain 'teacher' or 'student' to identify the model type.")
+    
+    model.load_state_dict(torch.load(os.path.join(args.run_dir, args.weight_file)))
 
     HIC_preds, HIC_trues = test(model, test_loader, y_transform=dataset.y_transform)
 
@@ -167,7 +205,9 @@ if __name__ == "__main__":
 
     # 写入 Markdown 文件
     markdown_content = f"""
-# Teacher Model Results
+## Model Identification
+- **Weight file**: {args.weight_file}
+- **Model Directory**: {args.run_dir}
 
 ## HIC Metrics
 - **RMSE**: {rmse:.4f}
@@ -199,11 +239,12 @@ if __name__ == "__main__":
 ```
 """
 
-    file_path = os.path.join(run_dir, "TestResults.md")
-    with open(file_path, "w", encoding="utf-8") as md_file:
+    # 写入 Markdown 文件
+    markdown_file = os.path.join(args.run_dir, f"TestResults_{args.weight_file.replace('.pth', '')}.md")
+    with open(markdown_file, "w", encoding="utf-8") as md_file:
         md_file.write(markdown_content)
 
-    print(f"Results written to {file_path}")
+    print(f"Results written to {markdown_file}")
 
     # 绘制散点图
     plt.figure(figsize=(8, 6))
@@ -211,9 +252,9 @@ if __name__ == "__main__":
     plt.plot([0, 2500], [0, 2500], 'r--', label="Ideal Line")  # 理想预测线即 y = x
     plt.xlabel("Ground Truth (HIC)")
     plt.ylabel("Predictions (HIC)")
-    plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set (Teacher Model)") 
+    plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
     plt.legend()
     plt.grid(True)
-    plt.savefig(os.path.join(run_dir, "HIC_scatter_plot.png"))
+    plt.savefig(os.path.join(args.run_dir, "HIC_scatter_plot.png"))
     plt.show()
     

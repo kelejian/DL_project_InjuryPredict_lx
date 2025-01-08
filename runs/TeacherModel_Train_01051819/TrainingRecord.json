@@ -12,6 +12,8 @@
         }
     },
     "hyperparameters related to model": {
+        "Ksize_init": 6,
+        "Ksize_mid": 3,
         "num_blocks_of_tcn": 4,
         "num_layers_of_mlpE": 4,
         "num_layers_of_mlpD": 4,

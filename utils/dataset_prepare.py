@@ -19,10 +19,11 @@ torch.cuda.manual_seed(seed)
 np.random.seed(seed)
 random.seed(seed)
 
-class SigmoidTransform(nn.Module):
+class SigmoidTransform(nn.Module): 
     """
     对标签值HIC进行 Sigmoid 变换和反变换。感兴趣范围被映射到[sigmoid(-2), sigmoid(2)]
-    相当于隐性地为不同HIC的样本在训练中加权, 同时兼顾数值稳定性。
+    相当于隐性地为不同HIC的样本在训练中加权
+    反变换容易数值溢出(比如原始HIC>12000, >10000后就有不小误差)
     """
     def __init__(self, lower_bound, upper_bound):
         """
@@ -53,6 +54,7 @@ class SigmoidTransform(nn.Module):
     def inverse(self, y_transformed):
         """
         对 Sigmoid 变换后的标签值进行反变换。
+        容易数值溢出(比如原始HIC>12000, >10000后就有不小误差)
         
         参数:
             y_transformed (torch.Tensor): 变换后的标签值，形状为(B,)。
@@ -64,7 +66,7 @@ class SigmoidTransform(nn.Module):
 
 # 经验公式计算AIS
 def AIS_3_cal(HIC):
-    HIC = np.clip(HIC, 1, 2000)
+    HIC = np.clip(HIC, 1, 2500)
     coefficients = np.array([
         [1.54, 0.00650],  # P(AIS≥1)
         [3.39, 0.00372]   # P(AIS≥3)
@@ -79,7 +81,7 @@ def AIS_3_cal(HIC):
 
 def AIS_cal(HIC, prob_output=False):
     # 限制 HIC 范围，防止数值不稳定
-    HIC = np.clip(HIC, 1, 2000)
+    HIC = np.clip(HIC, 1, 2500)
 
     # 定义常量和系数
     coefficients = np.array([
@@ -139,6 +141,10 @@ class CrashDataset(Dataset):
         # 目标变量
         self.y_HIC = self.x_att[:, 8]  # HIC 值
         self.y_AIS = AIS_cal(self.y_HIC)  # 计算 AIS-6C 值
+        
+        # print(f"y_HIC中<100的值的数量: {len(np.where(self.y_HIC < 100)[0])}")
+        # print(f"y_HIC中>2000的值的数量: {len(np.where(self.y_HIC > 2000)[0])}")
+        # print(f"y_HIC最大值: {np.max(self.y_HIC)}")
 
         # 实际输入特征
         self.x_att = self.x_att[:, :8]
@@ -173,7 +179,7 @@ class CrashDataset(Dataset):
         # 5: belt usage (离散，0/1)
         # 6: airbag usage (离散，0/1)
         # 7: occupant size (离散，0/1/2)
-        # 8: HIC (连续，目标变量): 0~ >2000
+        # 8: HIC (连续，目标变量): 0 ~ >2000, 最大的在30000-40000之间
 
         # 处理连续特征
         for idx in self.continuous_indices:
@@ -194,20 +200,6 @@ class CrashDataset(Dataset):
         """
         for idx, mapping in self.encoding_mappings.items():
             print(f"Feature {idx} encoding mapping: {mapping}")
-
-    def Loss_expect_cal(self):
-        """
-        后续HIC对应MSEloss, AIS对应Classification loss, 此处分别计算二者的期望:
-        设HIC_pred和HIC_true独立同分布, AIS_pred和AIS_true独立同分布
-        """
-        _HIC = np.clip(self.y_HIC, 0, 2500) # 裁剪HIC
-        MSEloss_expect = 2 * np.std(_HIC) ** 2 # E((HIC_pred - HIC_true)^2) = 2 * HIC_std^2 
-
-        # 统计y_AIS的分布
-        AIS_prob = np.bincount(self.y_AIS) / len(self.y_AIS)
-        Classification_loss_expect = -np.log(np.sum(AIS_prob ** 2)) # E(-log(P(AIS_pred = AIS_true))) = -log(sum(P(AIS=c)^2))
-
-        return MSEloss_expect, Classification_loss_expect
 
     def __len__(self):
         return len(self.x_acc)
@@ -262,3 +254,11 @@ if __name__ == '__main__':
         print(x_acc.shape, x_att_continuous.shape, x_att_discrete.shape, y_HIC.shape, y_AIS.shape)
         break
     print("batch time:", time.time() - batch_start_time)
+
+    ytrans=SigmoidTransform(0, 2500)
+    tensor = torch.tensor([0, 100, 1000, 2000, 2500, 10000, 12000, 36000], dtype=torch.float32)
+    y_transformed = ytrans(tensor)
+    print(y_transformed)
+    y_inverse = ytrans.inverse(y_transformed)
+    print(y_inverse)
+    print(y_inverse - tensor)
