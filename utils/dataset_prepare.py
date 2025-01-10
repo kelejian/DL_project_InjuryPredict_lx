@@ -164,9 +164,8 @@ class CrashDataset(Dataset):
         # 可能存在噪声，不够平滑
         # 对 X 和 Y 方向的波形数据进行归一化
         for i in range(2):  # 分别处理 X 和 Y 方向
-            min_val = np.min(self.x_acc[:, i])
             max_val = np.max(self.x_acc[:, i])
-            self.x_acc[:, i] = (self.x_acc[:, i] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+            self.x_acc[:, i] = self.x_acc[:, i] / max_val * 0.5
 
         # 特征数据 (x_att)
         # 形状 (5777, 9)，9 个特征，包括连续和离散变量
@@ -185,7 +184,11 @@ class CrashDataset(Dataset):
         for idx in self.continuous_indices:
             min_val = np.min(self.x_att[:, idx])
             max_val = np.max(self.x_att[:, idx])
-            self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+            if idx == 3:
+                # 角度特征, 归一化考虑正负, 归一化到 [-0.5, 0.5]
+                self.x_att[:, idx] = self.x_att[:, idx] / max_val * 0.5
+            else:
+                self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
 
         # 处理离散特征
         for idx in self.discrete_indices:
