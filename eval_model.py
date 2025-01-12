@@ -85,7 +85,7 @@ if __name__ == "__main__":
     # 解析命令行参数
     import argparse
     parser = argparse.ArgumentParser(description="Test Teacher or Student Model")
-    parser.add_argument("--run_dir", '-r', type=str, default="./runs/StudentModel_Baseline_01081644")
+    parser.add_argument("--run_dir", '-r', type=str, default=".\\runs\\StudentModel_Baseline_01122201")
     parser.add_argument("--weight_file", '-w', type=str, default="student_best_mae.pth")
     args = parser.parse_args()
 
@@ -171,6 +171,14 @@ if __name__ == "__main__":
 
     HIC_preds, HIC_trues = test(model, test_loader, y_transform=dataset.y_transform)
 
+    # 找出预测差别最大的5条样本，打印其预测值和真实值
+    diff = np.abs(HIC_preds - HIC_trues)
+    max_diff_indices = np.argsort(diff)[-5:][::-1]
+    print("Top 5 samples with largest prediction errors:")
+    for i in max_diff_indices:
+        print(f"Sample {i}: Prediction: {HIC_preds[i]:.2f}, Ground Truth: {HIC_trues[i]:.2f}")
+
+
     HIC_preds[HIC_preds > 2500] = 2500 # 规定上界，过高的HIC值(>2000基本就危重伤)不具有实际意义
     HIC_trues[HIC_trues > 2500] = 2500  
 
@@ -248,12 +256,13 @@ if __name__ == "__main__":
     print(f"Results written to {markdown_file}")
 
     # 绘制散点图
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 7))
     plt.scatter(HIC_trues, HIC_preds, c='blue', alpha=0.5, label="Predictions vs Ground Truth")
+    plt.legend(fontsize=14)
     plt.plot([0, 2500], [0, 2500], 'r--', label="Ideal Line")  # 理想预测线即 y = x
-    plt.xlabel("Ground Truth (HIC)")
-    plt.ylabel("Predictions (HIC)")
-    plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
+    plt.xlabel("Ground Truth (HIC)", fontsize=16)
+    plt.ylabel("Predictions (HIC)", fontsize=16)
+    #plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
     plt.legend()
     plt.grid(True)
     plt.savefig(os.path.join(args.run_dir, "HIC_scatter_plot.png"))

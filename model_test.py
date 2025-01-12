@@ -153,4 +153,4 @@ if __name__ == "__main__":
 
     # 测试模型
     test_model(Teachermodel, inputs=(x_acc, x_att_continuous, x_att_discrete), labels=y_HIC)
-    test_model(Studentmodel, inputs=(x_att_continuous, x_att_discrete), labels=y_HIC)
+    #test_model(Studentmodel, inputs=(x_att_continuous, x_att_discrete), labels=y_HIC)

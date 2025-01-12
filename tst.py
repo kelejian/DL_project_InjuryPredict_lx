@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 # Define the function
 # Define the function
-_HIC = np.linspace(1, 2000, 1000)
+_HIC = np.linspace(0, 2500, 2000)
 hic = np.zeros((5, len(_HIC)))
 ais_prob = np.zeros((6, len(_HIC)))
 
@@ -22,12 +22,12 @@ ais_prob[4] = hic[3] - hic[4]  # AIS=4的概率
 ais_prob[5] = hic[4]  # AIS=5的概率
 
 # 在一张图中绘制 AIS 各个概率随 _HIC 变化的曲线
-plt.plot(_HIC, ais_prob[0], label="AIS=0", color="blue")
-plt.plot(_HIC, ais_prob[1], label="AIS=1", color="green")
-plt.plot(_HIC, ais_prob[2], label="AIS=2", color="red")
-plt.plot(_HIC, ais_prob[3], label="AIS=3", color="purple")
-plt.plot(_HIC, ais_prob[4], label="AIS=4", color="orange")
-plt.plot(_HIC, ais_prob[5], label="AIS=5", color="yellow")
+plt.figure(figsize=(10, 6))
+plt.plot(_HIC, hic[0], label="P(AIS>=1|HIC)", color="blue")
+plt.plot(_HIC, hic[1], label="P(AIS>=2|HIC)", color="green")
+plt.plot(_HIC, hic[2], label="P(AIS>=3|HIC)", color="red")
+plt.plot(_HIC, hic[3], label="P(AIS>=4|HIC)", color="purple")
+plt.plot(_HIC, hic[4], label="P(AIS>=5|HIC)", color="orange")
 plt.xlabel("HIC", fontsize=12)
 plt.ylabel("Probability", fontsize=12)
 plt.title("AIS Probability vs. HIC", fontsize=14)
@@ -311,6 +311,39 @@ plt.title('Y Direction Curves')
 plt.xlabel('Time Step')
 plt.ylabel('Amplitude')
 plt.legend()
+plt.show()
+
+# %%
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+
+# Confusion matrix data
+confusion_matrix = np.array([[358,  17,   0,   0,   0,   0],
+ [ 20,  62,  17,   0,   0,   0],
+ [  0,  23,  61,   7,   0,   1],
+ [  0,   1,  15,  50,  11,   0],
+ [  0,   0,   0,   6,  31,   2],
+ [  0,   0,   0,   0,  14,  81]])
+
+# Class labels
+labels = ['AIS=0', 'AIS=1', 'AIS=2', 'AIS=3', 'AIS=4', 'AIS=5']
+
+# Plot the confusion matrix
+plt.figure(figsize=(8, 6))
+# 调大字体
+sns.set(font_scale=1.5)
+sns.heatmap(confusion_matrix, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
+
+# Add labels, title, and axis formatting
+#plt.title('Confusion Matrix', fontsize=20)
+plt.xlabel('AIS Preds', fontsize=20)
+plt.ylabel('AIS Trues', fontsize=20)
+plt.xticks(rotation=0)
+plt.yticks(rotation=0)
+
+# Show the plot
+plt.tight_layout()
 plt.show()
 
 # %%

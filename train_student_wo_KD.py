@@ -149,22 +149,22 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义优化相关的超参数
     Epochs = 500
-    Batch_size = 64
+    Batch_size = 512
     Learning_rate = 0.01 # 初始学习率
-    Learning_rate_min = 1e-6  # 余弦退火最小学习率
+    Learning_rate_min = 5e-7  # 余弦退火最小学习率
     weight_decay = 0.0001  # L2 正则化系数
     Patience = 8  # 早停等待轮数
-    base_loss = "mse"  # 或 "mae"
-    weight_factor_classify = 5.0  # 加权损失函数的系数1
-    weight_factor_sample = 1.0  # 加权损失函数的系数2
+    base_loss = "mae"  # "mae" 或 "mse"
+    weight_factor_classify = 1.7  # 加权损失函数的系数1
+    weight_factor_sample = 0.5  # 加权损失函数的系数2
     # 定义模型相关的超参数
-    num_layers_of_mlpE = 3  # MLP 编码器的层数
+    num_layers_of_mlpE = 4  # MLP 编码器的层数
     num_layers_of_mlpD = 3  # MLP 解码器的层数
     mlpE_hidden = 128  # MLP 编码器的隐藏层维度
-    mlpD_hidden = 96  # MLP 解码器的隐藏层维度
-    encoder_output_dim = 64  # 编码器输出特征维度
-    decoder_output_dim = 16  # 解码器输出特征维度
-    dropout = 0.1  # Dropout 概率
+    mlpD_hidden = 128  # MLP 解码器的隐藏层维度
+    encoder_output_dim = 96  # 编码器输出特征维度
+    decoder_output_dim = 32  # 解码器输出特征维度
+    dropout = 0.05  # Dropout 概率
     # 是否使用 HIC 标签变换对象
     lower_bound = 0  # HIC 标签的下界
     upper_bound = 2500  # HIC 标签的上界

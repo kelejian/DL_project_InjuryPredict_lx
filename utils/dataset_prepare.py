@@ -236,7 +236,7 @@ if __name__ == '__main__':
     # TEST
     start_time = time.time()
     HIC_transform = SigmoidTransform(0, 2500)
-    dataset = CrashDataset(y_transform=HIC_transform)
+    dataset = CrashDataset(y_transform=None)
     print("Dataset loading time:", time.time() - start_time)
 
     train_size = 5000
