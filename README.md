@@ -1,123 +1,128 @@
-## 1. Project Introduction
+# **Pre-Crash Occupant Injury Prediction Model based on Knowledge Distillation**
 
-This project aims to address a key challenge in the field of intelligent driving: how to quickly and accurately predict occupant injury risk before a collision occurs (the pre-crash stage).
+A PyTorch implementation of a pre-crash occupant injury prediction model that leverages knowledge distillation to balance accuracy and computational efficiency.
 
-Traditional post-crash injury prediction models can achieve high accuracy by leveraging detailed data generated during a collision (e.g., acceleration waveforms) with complex deep learning networks like TCNs. However, their high computational cost makes them unsuitable for the real-time requirements of pre-crash scenarios. Conversely, pre-crash models are computationally fast but are limited to using only basic scalar information (e.g., impact speed, angle), which restricts their accuracy.
+## **1\. Project Overview**
 
-To resolve this trade-off, this project proposes a training framework based on **Knowledge Distillation (KD)**:
-1.  **Teacher Model**: A complex, high-accuracy model based on a Temporal Convolutional Network (TCN) and a Multi-Layer Perceptron (MLP). It is trained on detailed post-crash data (vehicle crash waveforms + scalar features) and serves as the source of "knowledge."
-2.  **Student Model**: A lightweight model based solely on an MLP. It uses only pre-crash scalar features as input, making it simple, computationally efficient, and suitable for real-time prediction.
+This project addresses a key challenge in intelligent driving: achieving fast and accurate occupant injury risk prediction in the pre-crash phase. Traditional post-crash models are accurate but too slow for real-time use, while pre-crash models are fast but lack precision.
 
-During training, the Student Model learns not only from the ground-truth injury labels but also from the "knowledge" extracted by the Teacher Model's intermediate encoder and decoder layers via a **distillation loss**. This allows the Student Model to significantly improve its predictive performance (especially on the critical Head Injury AIS scale) without any additional computational overhead, successfully balancing prediction accuracy and computational efficiency.
+To bridge this gap, we propose a **Knowledge Distillation (KD)** framework:
 
-## 2. Project Structure
+* **Teacher Model**: A complex, high-precision Temporal Convolutional Network (TCN) and Multi-Layer Perceptron (MLP) model. It's trained on detailed post-crash data (waveforms \+ scalar features) to serve as the source of "knowledge."  
+* **Student Model**: A lightweight, MLP-only model. It uses only pre-crash scalar features, making it computationally efficient and suitable for real-time deployment.
 
-\`\`\`
-.
-├── runs/                 # Stores logs, model weights, and evaluation results for all training runs
-├── data/                 # Stores the raw dataset
-│   ├── data_crashpulse.npy   # Collision acceleration waveform data (N, 2, 150)
-│   └── data_features.npy     # Collision condition and occupant scalar feature data (N, 9)
-├── utils/                # Utility modules and helper functions
-│   ├── models.py             # Defines the Teacher and Student models
-│   ├── dataset_prepare.py    # Dataset preprocessing and loading
-│   ├── weighted_loss.py      # Custom weighted loss function
-│   └── combined_loss.py      # (Alternative) combined loss function
-├── train_teacher.py      # Script: Train the Teacher Model
-├── train_student_w_KD.py # Script: Train the Student Model with Knowledge Distillation
-├── train_student_wo_KD.py# Script: Train the Student Model independently (as a baseline)
-├── eval_model.py         # Script: Evaluate the performance of a trained model
-└── README.md             # Project documentation (this file)
-\`\`\`
+Through distillation, the Student Model learns from both the ground-truth labels and the rich feature representations learned by the Teacher Model. This significantly improves the Student's predictive performance on critical metrics like the Head Injury Criterion (HIC) and Abbreviated Injury Scale (AIS) without increasing its architectural complexity.
 
-## 3. Dependencies
+## **2\. Key Features**
 
-This project is implemented using Python and PyTorch. You will need to install the following main dependencies:
+* **High Efficiency & Accuracy**: Balances prediction accuracy with the low-latency requirements of pre-crash systems.  
+* **Knowledge Distillation**: Implements a teacher-student framework to transfer knowledge from a complex model to a lightweight one.  
+* **Modular Design**: Clear and separated scripts for training the teacher, the student (with and without KD), and evaluation.  
+* **Comprehensive Evaluation**: Provides detailed performance metrics, including MAE, RMSE, R² for regression (HIC) and Accuracy, G-mean, and a confusion matrix for classification (AIS).
 
-\`\`\`bash
-pip install torch torch_geometric numpy pandas scikit-learn matplotlib imbalanced-learn
-\`\`\`
+## **3\. Project Structure**
 
-- \`torch\`: The core deep learning framework.
-- \`torch_geometric\`: Used for quickly building MLP layers.
-- \`numpy\`, \`pandas\`: For data manipulation.
-- \`scikit-learn\`, \`imbalanced-learn\`: For model evaluation and metrics.
-- \`matplotlib\`: For visualizing results.
+.  
+├── runs/                 \# Stores logs, model weights, and results for all training runs  
+├── data/                 \# Stores the raw dataset files  
+│   ├── data\_crashpulse.npy   \# Crash acceleration waveform data (N, 2, 150\)  
+│   └── data\_features.npy     \# Scalar features for crash conditions and occupants (N, 9\)  
+├── utils/                \# Utility modules and helper functions  
+│   ├── models.py             \# Defines the Teacher and Student model architectures  
+│   ├── dataset\_prepare.py    \# Handles dataset preprocessing and loading  
+│   ├── weighted\_loss.py      \# Custom weighted loss function  
+│   └── combined\_loss.py      \# (Alternative) combined loss function  
+├── train\_teacher.py      \# Script: Train the Teacher Model  
+├── train\_student\_w\_KD.py \# Script: Train the Student Model with Knowledge Distillation  
+├── train\_student\_wo\_KD.py\# Script: Train the Student Model independently (as a baseline)  
+├── eval\_model.py         \# Script: Evaluate the performance of a trained model  
+└── README.md             \# This README file
 
-## 4. Usage Guide
+## **4\. Getting Started**
 
-Please follow the steps below to run this project.
+Follow these steps to set up the environment and prepare the data.
 
-### Step 1: Prepare the Dataset
+### **Prerequisites**
 
-First, run the \`dataset_prepare.py\` script to preprocess the raw data, split it into training, validation, and test sets, and save them as \`.pt\` files for faster loading in subsequent runs.
+This project is built with Python and PyTorch. Ensure you have a compatible environment. The key dependencies are:
 
-1.  Ensure the raw data files, \`data_crashpulse.npy\` and \`data_features.npy\`, are located in the \`./data/\` directory.
-2.  Execute the following command:
-    \`\`\`bash
-    python utils/dataset_prepare.py
-    \`\`\`
-    After successful execution, files like \`train_dataset.pt\`, \`val_dataset.pt\`, and \`test_dataset.pt\` will be generated in the \`./data/\` directory.
+* **torch**: The core deep learning framework.  
+* **torch\_geometric**: Used for rapid construction of MLP layers.  
+* **numpy, pandas**: For data handling and processing.  
+* **scikit-learn, imbalanced-learn**: For model evaluation and metrics calculation.  
+* **matplotlib**: For plotting and visualizing results.
 
-### Step 2: Train the Teacher Model
+### **Installation & Data Preparation**
 
-The Teacher Model serves as the foundation for knowledge distillation and must be trained first.
+1. **Clone the repository (optional, if you haven't already):**  
+   git clone \<your-repository-url\>  
+   cd \<repository-directory\>
 
--   Execute the following command to train the Teacher Model:
-    \`\`\`bash
-    python train_teacher.py
-    \`\`\`
--   Logs, model weights (\`teacher_best_*.pth\`), and hyperparameter records will be saved in a new directory inside \`./runs/\`, named with the pattern \`TeacherModel_Train_<timestamp>\`.
+2. **Install dependencies:**  
+   pip install torch torch\_geometric numpy pandas scikit-learn matplotlib imbalanced-learn
 
-### Step 3: Train the Student Model
+3. Prepare the Dataset:  
+   Place the raw data files, data\_crashpulse.npy and data\_features.npy, into the ./data/ directory. Then, run the preprocessing script:  
+   python utils/dataset\_prepare.py
 
-We provide two methods for training the Student Model: with knowledge distillation (recommended) and without (for baseline comparison).
+   This will generate train\_dataset.pt, val\_dataset.pt, and test\_dataset.pt in the ./data/ directory for faster loading during training.
 
-#### 3.1 With Knowledge Distillation (with KD)
+## **5\. Usage: Training and Evaluation**
 
-1.  **Update Teacher Model Path**: Open the \`train_student_w_KD.py\` file and locate line 196. Change the value of the \`teacher_run_dir\` variable to the path of the directory containing the Teacher Model you trained in **Step 2**.
-    \`\`\`python
-    # train_student_w_KD.py L196
-    teacher_run_dir = ".\\\\runs\\\\TeacherModel_Train_XXXXXXXX" # <--- Change this to your teacher model's run directory
-    \`\`\`
-2.  Execute the following command to start training:
-    \`\`\`bash
-    python train_student_w_KD.py
-    \`\`\`
--   The results will be saved in a new directory inside \`./runs/\`, named with the pattern \`StudentModel_Distill_<timestamp>\`.
+Follow the sequence below to train and evaluate the models.
 
-#### 3.2 Without Knowledge Distillation (without KD / Baseline)
+### **Step 1: Train the Teacher Model**
 
-This script trains a baseline Student Model to validate the effectiveness of knowledge distillation.
+The Teacher Model must be trained first as it provides the knowledge for distillation.
 
--   Simply execute the following command:
-    \`\`\`bash
-    python train_student_wo_KD.py
-    \`\`\`
--   The results will be saved in a new directory inside \`./runs/\`, named with the pattern \`StudentModel_Baseline_<timestamp>\`.
+python train\_teacher.py
 
-### Step 4: Evaluate Models
+Training artifacts, including logs, model weights (teacher\_best\_mae.pth), and hyperparameters, will be saved to a new timestamped directory in ./runs/ (e.g., TeacherModel\_Train\_\<timestamp\>).
 
-Use the \`eval_model.py\` script to evaluate the performance of any trained model on the test set.
+### **Step 2: Train the Student Model**
 
--   Execute the following command, specifying the model's run directory with \`-r\` (or \`--run_dir\`) and the specific weight file with \`-w\` (or \`--weight_file\`).
-    \`\`\`bash
-    python eval_model.py --run_dir <path_to_model_run_directory> --weight_file <model_weight_file.pth>
-    \`\`\`
+You can train the Student Model either with or without knowledge distillation.
 
--   **Examples**:
-    -   To evaluate the **Teacher Model** (assuming the best MAE weight is \`teacher_best_mae.pth\`):
-        \`\`\`bash
-        python eval_model.py -r ./runs/TeacherModel_Train_01121600 -w teacher_best_mae.pth
-        \`\`\`
-    -   To evaluate the **Student Model with KD** (assuming the best MAE weight is \`student_best_mae.pth\`):
-        \`\`\`bash
-        python eval_model.py -r ./runs/StudentModel_Distill_01122045 -w student_best_mae.pth
-        \`\`\`
-    -   To evaluate the **baseline Student Model**:
-        \`\`\`bash
-        python eval_model.py -r ./runs/StudentModel_Baseline_01122201 -w student_best_mae.pth
-        \`\`\`
+#### **With Knowledge Distillation (Recommended)**
 
--   The evaluation script will automatically calculate HIC prediction metrics (**MAE, RMSE, R²**) and AIS classification metrics (**Accuracy, Confusion Matrix, G-mean**). The detailed results will be saved to a \`.md\` file in the corresponding \`run_dir\`, along with a scatter plot of predicted vs. true values.
+1. **Update Teacher Model Path**: Open train\_student\_w\_KD.py and set the teacher\_run\_dir variable to the path of your trained Teacher Model from the previous step.  
+   \# In train\_student\_w\_KD.py (around line 196\)  
+   teacher\_run\_dir \= ".\\\\runs\\\\TeacherModel\_Train\_XXXXXXXX" \# \<-- IMPORTANT: Change this
 
+2. **Start Training**:  
+   python train\_student\_w\_KD.py
+
+   Results will be saved to a new directory like StudentModel\_Distill\_\<timestamp\> in ./runs/.
+
+#### **Without Knowledge Distillation (Baseline)**
+
+To train a baseline Student Model for comparison:
+
+python train\_student\_wo\_KD.py
+
+Results will be saved to a new directory like StudentModel\_Baseline\_\<timestamp\> in ./runs/.
+
+### **Step 3: Evaluate a Trained Model**
+
+Use the eval\_model.py script to evaluate any trained model on the test set. You need to specify the run directory and the weight file.
+
+python eval\_model.py \--run\_dir \<path\_to\_model\_directory\> \--weight\_file \<model\_weight\_filename.pth\>
+
+**Examples:**
+
+* **Evaluate the Teacher Model:**  
+  python eval\_model.py \-r ./runs/TeacherModel\_Train\_01121600 \-w teacher\_best\_mae.pth
+
+* **Evaluate the Student Model with KD:**  
+  python eval\_model.py \-r ./runs/StudentModel\_Distill\_01122045 \-w student\_best\_mae.pth
+
+* **Evaluate the Baseline Student Model:**  
+  python eval\_model.py \-r ./runs/StudentModel\_Baseline\_01122201 \-w student\_best\_mae.pth
+
+## **6\. Results**
+
+The evaluation script (eval\_model.py) will:
+
+1. Print key performance metrics to the console for both HIC prediction (MAE, RMSE, R²) and AIS classification (Accuracy, G-mean, Confusion Matrix).  
+2. Save a detailed evaluation\_report.md file in the specified run directory.  
+3. Generate and save a scatter plot (HIC\_prediction\_scatter.png) comparing predicted vs. actual HIC values.
