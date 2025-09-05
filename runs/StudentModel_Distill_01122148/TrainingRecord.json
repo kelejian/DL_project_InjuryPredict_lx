@@ -1,0 +1,35 @@
+{
+    "hyperparameters related to training": {
+        "Epochs": 500,
+        "Batch_size": 512,
+        "Learning_rate": 0.01,
+        "Learning_rate_min": 5e-07,
+        "weight_decay": 0.0001,
+        "Patience": 8,
+        "distill_encoder_weight": 100.0,
+        "distill_decoder_weight": 30.0,
+        "teacher_run_dir": ".\\runs\\TeacherModel_Train_01121600",
+        "teacher_model_name": "teacher_best_mae.pth",
+        "base_loss": "mae",
+        "weight_factor_classify": 1.7,
+        "weight_factor_sample": 0.5
+    },
+    "hyperparameters related to model": {
+        "num_layers_of_mlpE": 4,
+        "num_layers_of_mlpD": 3,
+        "mlpE_hidden": 128,
+        "mlpD_hidden": 128,
+        "encoder_output_dim": 96,
+        "decoder_output_dim": 32,
+        "dropout": 0.05
+    },
+    "results": {
+        "final_epoch": 500,
+        "Best_accu": 88.0,
+        "Best_mae": 58.70881271362305,
+        "Best_rmse": 150.1321563720703,
+        "last_val_accuracy": 86.8,
+        "last_val_mae": 61.047725677490234,
+        "last_val_rmse": 156.1224365234375
+    }
+}

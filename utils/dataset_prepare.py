@@ -12,7 +12,7 @@ import warnings
 warnings.filterwarnings("ignore")
 # Define the random seed.
 #os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-seed = 123
+seed = 2025
 torch.manual_seed(seed)
 torch.cuda.manual_seed_all(seed)
 torch.cuda.manual_seed(seed)
@@ -164,9 +164,8 @@ class CrashDataset(Dataset):
         # 可能存在噪声，不够平滑
         # 对 X 和 Y 方向的波形数据进行归一化
         for i in range(2):  # 分别处理 X 和 Y 方向
-            min_val = np.min(self.x_acc[:, i])
             max_val = np.max(self.x_acc[:, i])
-            self.x_acc[:, i] = (self.x_acc[:, i] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+            self.x_acc[:, i] = self.x_acc[:, i] / max_val * 0.5
 
         # 特征数据 (x_att)
         # 形状 (5777, 9)，9 个特征，包括连续和离散变量
@@ -185,7 +184,11 @@ class CrashDataset(Dataset):
         for idx in self.continuous_indices:
             min_val = np.min(self.x_att[:, idx])
             max_val = np.max(self.x_att[:, idx])
-            self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
+            if idx == 3:
+                # 角度特征, 归一化考虑正负, 归一化到 [-0.5, 0.5]
+                self.x_att[:, idx] = self.x_att[:, idx] / max_val * 0.5
+            else:
+                self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
 
         # 处理离散特征
         for idx in self.discrete_indices:
@@ -232,7 +235,8 @@ if __name__ == '__main__':
     import time
     # TEST
     start_time = time.time()
-    dataset = CrashDataset()
+    HIC_transform = SigmoidTransform(0, 2500)
+    dataset = CrashDataset(y_transform=None)
     print("Dataset loading time:", time.time() - start_time)
 
     train_size = 5000
@@ -240,6 +244,16 @@ if __name__ == '__main__':
     test_size = len(dataset) - train_size - val_size
 
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+    # 把三者保存到本地
+    if dataset.y_transform is None:
+        torch.save(train_dataset, './data/train_dataset.pt')
+        torch.save(val_dataset, './data/val_dataset.pt')
+        torch.save(test_dataset, './data/test_dataset.pt')
+    else:
+        torch.save(train_dataset, './data/train_dataset_ytrans.pt')
+        torch.save(val_dataset, './data/val_dataset_ytrans.pt')
+        torch.save(test_dataset, './data/test_dataset_ytrans.pt')
 
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=0)
@@ -254,11 +268,3 @@ if __name__ == '__main__':
         print(x_acc.shape, x_att_continuous.shape, x_att_discrete.shape, y_HIC.shape, y_AIS.shape)
         break
     print("batch time:", time.time() - batch_start_time)
-
-    ytrans=SigmoidTransform(0, 2500)
-    tensor = torch.tensor([0, 100, 1000, 2000, 2500, 10000, 12000, 36000], dtype=torch.float32)
-    y_transformed = ytrans(tensor)
-    print(y_transformed)
-    y_inverse = ytrans.inverse(y_transformed)
-    print(y_inverse)
-    print(y_inverse - tensor)

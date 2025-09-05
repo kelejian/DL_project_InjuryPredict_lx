@@ -147,47 +147,41 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义优化相关的超参数
     Epochs = 500
-    Batch_size = 128
-    Learning_rate = 0.01  # 初始学习率
-    Learning_rate_min = 1e-5  # 余弦退火最小学习率
-    weight_decay = 0.001  # L2 正则化系数
-    Patience = 8  # 早停等待轮数
-    base_loss = "mse"  # 或 "mae"
-    weight_factor_classify = 2.50  # 加权损失函数的系数1
-    weight_factor_sample = 2.0  # 加权损失函数的系数2
+    Batch_size = 512
+    Learning_rate = 0.012  # 初始学习率 0.008-0.015
+    Learning_rate_min = 5e-7  # 余弦退火最小学习率
+    weight_decay = 6e-4  # L2 正则化系数 2e-4 - 8e-4
+    Patience = 8  # 早停等待轮数 
+    base_loss = "mae" # mae or mse
+    weight_factor_classify = 1.8  # 加权损失函数的系数1 1.4-1.85
+    weight_factor_sample = 0.5  # 加权损失函数的系数2 0.3-0.8
     # 定义模型相关的超参数
-    Ksize_init = 10 # TCN 初始卷积核大小，必须是偶数
-    Ksize_mid = 5  # TCN 中间卷积核大小，必须是奇数
-    num_blocks_of_tcn = 4  # TCN 的块数
-    num_layers_of_mlpE = 3  # MLP 编码器的层数
-    num_layers_of_mlpD = 3  # MLP 解码器的层数
-    mlpE_hidden = 96  # MLP 编码器的隐藏层维度
-    mlpD_hidden = 64  # MLP 解码器的隐藏层维度
-    encoder_output_dim = 64  # 编码器输出特征维度
-    decoder_output_dim = 16  # 解码器输出特征维度
-    dropout = 0.2 # Dropout 概率
-    # 是否使用 HIC 标签变换对象
+    Ksize_init = 6 # TCN 初始卷积核大小，必须是偶数 4-12
+    Ksize_mid = 3  # TCN 中间卷积核大小，必须是奇数 3 or 5
+    num_blocks_of_tcn = 6  # TCN 的块数 2 - 6
+    num_layers_of_mlpE = 4  # MLP 编码器的层数 4-5
+    num_layers_of_mlpD = 5  # MLP 解码器的层数 4-5
+    mlpE_hidden = 256  # MLP 编码器的隐藏层维度 96 - 192
+    mlpD_hidden = 128  # MLP 解码器的隐藏层维度 128 or 256
+    encoder_output_dim = 96  # 编码器输出特征维度 64 or 96
+    decoder_output_dim = 32  # 解码器输出特征维度 16 or 32 or 64
+    dropout = 0.1 # Dropout 概率 0.05-0.25
+    # 是否使用 HIC 标签变换对象（暂时不使用）
     lower_bound = 0  # HIC 标签的下界
     upper_bound = 2500  # HIC 标签的上界
-    HIC_transform = None  # HIC 标签变换对象 或 SigmoidTransform(lower_bound, upper_bound) 暂不用
+    HIC_transform = None  # HIC 标签变换对象 或 SigmoidTransform(lower_bound, upper_bound)
     ############################################################################################
     ############################################################################################
 
-    # 设定数据集大小
-    train_size = 5000
-    val_size = 500
-
-    # 加载标签变换对象和数据集
+    # 加载数据集对象
     dataset = CrashDataset(y_transform=HIC_transform)
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, len(dataset) - train_size - val_size])
-    if HIC_transform is not None:
-        torch.save(train_dataset, "./data/train_dataset_hic_ytrans.pt")
-        torch.save(val_dataset, "./data/val_dataset_hic_ytrans.pt")
-        torch.save(test_dataset, "./data/test_dataset_hic_ytrans.pt")
+    # 从data文件夹直接加载数据集
+    if dataset.y_transform is None:
+        train_dataset = torch.load("./data/train_dataset.pt")
+        val_dataset = torch.load("./data/val_dataset.pt")
     else:
-        torch.save(train_dataset, "./data/train_dataset.pt")
-        torch.save(val_dataset, "./data/val_dataset.pt")
-        torch.save(test_dataset, "./data/test_dataset.pt")
+        train_dataset = torch.load("./data/train_dataset_ytrans.pt")
+        val_dataset = torch.load("./data/val_dataset_ytrans.pt")
 
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=Batch_size, shuffle=False, num_workers=0)
@@ -247,21 +241,21 @@ if __name__ == "__main__":
         # 保存分类准确率最佳的模型
         if val_accuracy > Best_accu:
             Best_accu = val_accuracy
-            if Best_accu > 80:
+            if Best_accu > 83:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_accu.pth"))
                 print(f"Best model saved with val accuracy: {Best_accu:.2f}%")
 
         # 保存 MAE 最佳的模型
         if val_mae < Best_mae:
             Best_mae = val_mae
-            if Best_mae < 200:
+            if Best_mae < 80:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_mae.pth"))
                 print(f"Best model saved with val MAE: {Best_mae:.1f}")
 
         # 保存 RMSE 最佳的模型
         if val_rmse < Best_rmse:
             Best_rmse = val_rmse
-            if Best_rmse < 300:
+            if Best_rmse < 180:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_rmse.pth"))
                 print(f"Best model saved with val RMSE: {Best_rmse:.1f}")
 

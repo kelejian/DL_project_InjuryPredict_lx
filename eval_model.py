@@ -85,8 +85,8 @@ if __name__ == "__main__":
     # 解析命令行参数
     import argparse
     parser = argparse.ArgumentParser(description="Test Teacher or Student Model")
-    parser.add_argument("--run_dir", type=str, required=True, help="Path to the run directory containing the model and training record (e.g., .\\runs\\TeacherModel_Train_01081257).")
-    parser.add_argument("--weight_file", type=str, default="teacher_best_mae.pth" , help="Name of the model weight file (e.g., teacher_best_accu.pth).")
+    parser.add_argument("--run_dir", '-r', type=str, default=".\\runs\\StudentModel_Baseline_01122201")
+    parser.add_argument("--weight_file", '-w', type=str, default="student_best_mae.pth")
     args = parser.parse_args()
 
     # 加载超参数和训练记录
@@ -95,9 +95,6 @@ if __name__ == "__main__":
 
     # 提取模型相关的超参数
     model_params = training_record["hyperparameters related to model"]
-    Ksize_init = model_params["Ksize_init"]
-    Ksize_mid = model_params["Ksize_mid"]
-    num_blocks_of_tcn = model_params.get("num_blocks_of_tcn", None)  # 仅教师模型需要
     num_layers_of_mlpE = model_params["num_layers_of_mlpE"]
     num_layers_of_mlpD = model_params["num_layers_of_mlpD"]
     mlpE_hidden = model_params["mlpE_hidden"]
@@ -122,12 +119,13 @@ if __name__ == "__main__":
 
     # 加载数据集
     dataset = CrashDataset(y_transform=HIC_transform)
-    if HIC_transform is not None:
+    if dataset.y_transform is not None:
         test_dataset1 = torch.load("./data/val_dataset_ytrans.pt")
         test_dataset2 = torch.load("./data/test_dataset_ytrans.pt")
     else:
         test_dataset1 = torch.load("./data/val_dataset.pt")
         test_dataset2 = torch.load("./data/test_dataset.pt")
+        
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
 
@@ -136,6 +134,9 @@ if __name__ == "__main__":
 
     # 判断是教师模型还是学生模型
     if "teacher" in args.weight_file.lower():
+        Ksize_init = model_params["Ksize_init"]
+        Ksize_mid = model_params["Ksize_mid"]
+        num_blocks_of_tcn = model_params.get("num_blocks_of_tcn", None)  # 仅教师模型需要
         # 加载教师模型
         model = models.TeacherModel(
         Ksize_init=Ksize_init,
@@ -169,6 +170,14 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(os.path.join(args.run_dir, args.weight_file)))
 
     HIC_preds, HIC_trues = test(model, test_loader, y_transform=dataset.y_transform)
+
+    # 找出预测差别最大的5条样本，打印其预测值和真实值
+    diff = np.abs(HIC_preds - HIC_trues)
+    max_diff_indices = np.argsort(diff)[-5:][::-1]
+    print("Top 5 samples with largest prediction errors:")
+    for i in max_diff_indices:
+        print(f"Sample {i}: Prediction: {HIC_preds[i]:.2f}, Ground Truth: {HIC_trues[i]:.2f}")
+
 
     HIC_preds[HIC_preds > 2500] = 2500 # 规定上界，过高的HIC值(>2000基本就危重伤)不具有实际意义
     HIC_trues[HIC_trues > 2500] = 2500  
@@ -247,12 +256,13 @@ if __name__ == "__main__":
     print(f"Results written to {markdown_file}")
 
     # 绘制散点图
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 7))
     plt.scatter(HIC_trues, HIC_preds, c='blue', alpha=0.5, label="Predictions vs Ground Truth")
+    plt.legend(fontsize=14)
     plt.plot([0, 2500], [0, 2500], 'r--', label="Ideal Line")  # 理想预测线即 y = x
-    plt.xlabel("Ground Truth (HIC)")
-    plt.ylabel("Predictions (HIC)")
-    plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
+    plt.xlabel("Ground Truth (HIC)", fontsize=16)
+    plt.ylabel("Predictions (HIC)", fontsize=16)
+    #plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
     plt.legend()
     plt.grid(True)
     plt.savefig(os.path.join(args.run_dir, "HIC_scatter_plot.png"))
