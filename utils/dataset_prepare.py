@@ -119,17 +119,25 @@ def AIS_cal(HIC, prob_output=False):
         return AIS
     
 class CrashDataset(Dataset):
-    def __init__(self, acc_file='./data/data_crashpulse.npy', att_file='./data/data_features.npy', y_transform=None):
+    def __init__(self, input_file='./data/data_input.npz', label_file='./data/hic15_labels.npz', y_transform=None):
         """
         Args:
-            acc_file (str): 碰撞波形数据的文件路径 (x_acc)。
-            att_file (str): 特征数据的文件路径 (x_att)。
+            input_file (str): 包含碰撞波形和特征数据的 .npz 文件路径。
+            label_file (str): 包含标签数据的 .npz 文件路径。
             y_transform (callable, optional): 可选是否对标签HIC值进行变换。默认为 None。
         """
-        self.x_acc = np.load(acc_file)  # 加载碰撞波形数据  npdarray (5777, 2, 150)
-        self.x_att = np.load(att_file)  # 加载其他特征数据  npdarray (5777, 9)
-        self.continuous_indices = [0, 1, 3, 4]  # 连续特征的索引
-        self.discrete_indices = [2, 5, 6, 7]  # 离散特征的索引
+        self.inputs = np.load(input_file)
+        self.labels = np.load(label_file)
+
+        self.case_ids = self.inputs['case_ids'] # 形状 (N,)
+
+        # 输入特征
+        self.x_acc = self.inputs['waveforms'] # 形状 (N, 3, 150) acceleration waveforms
+        self.x_att = self.inputs['params'] # 形状 (N, 18)  attributes
+
+        # 目标变量
+        self.y_HIC = self.labels['hic15']  # 形状 (N,)
+        self.y_AIS = self.labels['ais']  # 形状 (N,)
 
         # 初始化 LabelEncoder 和映射关系存储
         self.label_encoders = {}  # 存储每个离散特征的 LabelEncoder
@@ -137,17 +145,10 @@ class CrashDataset(Dataset):
 
         # 数据预处理
         self._preprocess_data()
-
-        # 目标变量
-        self.y_HIC = self.x_att[:, 8]  # HIC 值
-        self.y_AIS = AIS_cal(self.y_HIC)  # 计算 AIS-6C 值
-        
+      
         # print(f"y_HIC中<100的值的数量: {len(np.where(self.y_HIC < 100)[0])}")
         # print(f"y_HIC中>2000的值的数量: {len(np.where(self.y_HIC > 2000)[0])}")
         # print(f"y_HIC最大值: {np.max(self.y_HIC)}")
-
-        # 实际输入特征
-        self.x_att = self.x_att[:, :8]
 
         # 存储每个离散特征的类别数
         self.num_classes_of_discrete = [
@@ -155,38 +156,54 @@ class CrashDataset(Dataset):
 
         self.y_transform = y_transform
 
+        # 关闭 npz 文件以避免 pickle 错误
+        self.inputs.close()
+        self.labels.close()
+
     def _preprocess_data(self):
         """
         数据预处理, 分别处理连续特征和离散特征
         """
         # 碰撞波形数据 (x_acc)
-        # 形状 (5777, 2, 150)，2 表示 X 和 Y 方向，150 表示时间步长
-        # 可能存在噪声，不够平滑
-        # 对 X 和 Y 方向的波形数据进行归一化
-        for i in range(2):  # 分别处理 X 和 Y 方向
+        # 形状 (5777, 3, 150)，3 表示 X 和 Y 和 Z 方向，150 表示时间步长
+        # 可能存在噪声，不够平滑，尤其是y和z方向
+        # 对 X 和 Y 和 Z 方向的波形数据进行归一化
+        for i in range(3):  # 分别处理 X 和 Y 和 Z 方向
             max_val = np.max(self.x_acc[:, i])
-            self.x_acc[:, i] = self.x_acc[:, i] / max_val * 0.5
+            self.x_acc[:, i] = self.x_acc[:, i] / max_val
 
         # 特征数据 (x_att)
-        # 形状 (5777, 9)，9 个特征，包括连续和离散变量
-        # 特征索引及含义：
-        # 0: ego vehicle speed (连续): 23.0~140.0km/h
-        # 1: leading vehicle speed (连续): 10.0~120.0km/h
-        # 2: collision overlap rate (离散，0~6)
-        # 3: collision angle (连续): -30~30°
-        # 4: mass of the leading vehicle (连续): 900.0-3900.0kg
-        # 5: belt usage (离散，0/1)
-        # 6: airbag usage (离散，0/1)
-        # 7: occupant size (离散，0/1/2)
-        # 8: HIC (连续，目标变量): 0 ~ >2000, 最大的在30000-40000之间
+        # 形状 (N, 18)，18 个特征，包括连续和离散变量
+        # 特征索引：
+        # 0: impact_velocity (连续)
+        # 1: impact_angle (连续) 有正负
+        # 2: overlap (连续) 有正负
+        # 3: occupant_type (离散)
+        # 4: ll1 (连续)
+        # 5: ll2 (连续)
+        # 6: btf (连续)
+        # 7: pp (连续)
+        # 8: plp (连续)
+        # 9: lla_status (离散)
+        # 10: llattf (连续)
+        # 11: dz (离散)
+        # 12: ptf (连续)
+        # 13: aft (连续)
+        # 14: aav_status (离散)
+        # 15: ttf (连续)
+        # 16: sp (连续) : 座椅前后位置 (SP - Seat Position) 有正负
+        # 17: recline_angle (连续)  座椅靠背角度 (Recline angle) 有正负
+
+        self.continuous_indices = [0, 1, 4, 5, 6, 7, 8, 10, 12, 13, 15, 16, 17]  # 连续特征的索引
+        self.discrete_indices = [3, 9, 11, 14]  # 离散特征的索引
 
         # 处理连续特征
         for idx in self.continuous_indices:
             min_val = np.min(self.x_att[:, idx])
             max_val = np.max(self.x_att[:, idx])
-            if idx == 3:
-                # 角度特征, 归一化考虑正负, 归一化到 [-0.5, 0.5]
-                self.x_att[:, idx] = self.x_att[:, idx] / max_val * 0.5
+            if idx in [1, 2, 16, 17]:
+                # 归一化考虑正负, 归一化到 [-1, 1]
+                self.x_att[:, idx] = self.x_att[:, idx] / max_val
             else:
                 self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
 
@@ -211,12 +228,12 @@ class CrashDataset(Dataset):
         """
         根据索引获取数据。
         """
-        x_acc = self.x_acc[idx]  # 碰撞波形数据，形状 (2, 150)
-        x_att = self.x_att[idx]  # 特征数据，形状 (8,)
+        x_acc = self.x_acc[idx]  # 碰撞波形数据，形状 (3, 150)
+        x_att = self.x_att[idx]  # 特征数据，形状 (18,)
         y_HIC = self.y_HIC[idx]  # HIC 值，标量
         y_AIS = self.y_AIS[idx]  # AIS 值，标量
 
-        x_att_continuous = x_att[self.continuous_indices]  # 连续特征，形状 (4,)
+        x_att_continuous = x_att[self.continuous_indices]  # 连续特征，形状 (12,)
         x_att_discrete = x_att[self.discrete_indices]      # 离散特征，形状 (4,)
         
         # 如果提供了标签变换函数，则对标签进行变换
@@ -235,12 +252,12 @@ if __name__ == '__main__':
     import time
     # TEST
     start_time = time.time()
-    HIC_transform = SigmoidTransform(0, 2500)
+    #HIC_transform = SigmoidTransform(0, 2500)
     dataset = CrashDataset(y_transform=None)
     print("Dataset loading time:", time.time() - start_time)
 
-    train_size = 5000
-    val_size = 500
+    train_size = 500
+    val_size = 100
     test_size = len(dataset) - train_size - val_size
 
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])

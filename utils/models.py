@@ -194,7 +194,7 @@ class TeacherModel(nn.Module):
             num_channels = [64, 128] + [256] * (num_blocks_of_tcn - 2)
         elif num_blocks_of_tcn >= 5:
             num_channels = [64, 128] + [256] * (num_blocks_of_tcn - 3) + [512]
-        self.tcn = TemporalConvNet(in_channels=2, num_channels=num_channels, Ksize_init=Ksize_init, Ksize_mid=Ksize_mid, hidden=encoder_output_dim  // 2, dropout=dropout)
+        self.tcn = TemporalConvNet(in_channels=3, num_channels=num_channels, Ksize_init=Ksize_init, Ksize_mid=Ksize_mid, hidden=encoder_output_dim  // 2, dropout=dropout)
 
         # MLP 编码器，处理连续特征和离散特征的嵌入
         if num_layers_of_mlpE < 2:

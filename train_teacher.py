@@ -241,21 +241,21 @@ if __name__ == "__main__":
         # 保存分类准确率最佳的模型
         if val_accuracy > Best_accu:
             Best_accu = val_accuracy
-            if Best_accu > 83:
+            if Best_accu > 50:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_accu.pth"))
                 print(f"Best model saved with val accuracy: {Best_accu:.2f}%")
 
         # 保存 MAE 最佳的模型
         if val_mae < Best_mae:
             Best_mae = val_mae
-            if Best_mae < 80:
+            if Best_mae < 500:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_mae.pth"))
                 print(f"Best model saved with val MAE: {Best_mae:.1f}")
 
         # 保存 RMSE 最佳的模型
         if val_rmse < Best_rmse:
             Best_rmse = val_rmse
-            if Best_rmse < 180:
+            if Best_rmse < 500:
                 torch.save(model.state_dict(), os.path.join(run_dir, "teacher_best_rmse.pth"))
                 print(f"Best model saved with val RMSE: {Best_rmse:.1f}")
 
