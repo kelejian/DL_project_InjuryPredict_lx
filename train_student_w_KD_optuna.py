@@ -14,12 +14,8 @@ import joblib
 from optuna import TrialPruned
 from optuna.storages import RDBStorage
 
-seed = 2025
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
-random.seed(seed)
+from utils.set_random_seed import set_random_seed
+set_random_seed()
 
 def train_distill(model, teacher_model, loader, optimizer, criterion, device, distill_encoder_weight, distill_decoder_weight):
     """

@@ -7,12 +7,8 @@ from torch.utils.data import DataLoader, ConcatDataset
 from utils import models
 from utils.dataset_prepare import CrashDataset, SigmoidTransform
 
-# 定义随机种子
-seed = 2025
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
+from utils.set_random_seed import set_random_seed
+set_random_seed()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

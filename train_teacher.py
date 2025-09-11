@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# 2025.1.7
+import warnings
+warnings.filterwarnings('ignore')
 import os, json
 import time
 from datetime import datetime
@@ -16,18 +17,8 @@ from utils import models
 from utils.weighted_loss import weighted_loss
 from utils.dataset_prepare import SigmoidTransform, CrashDataset, AIS_cal
 
-#import wandb
-
-warnings.filterwarnings('ignore')
-
-# Define the random seed.
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-seed = 2025
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
-random.seed(seed)
+from utils.set_random_seed import set_random_seed
+set_random_seed()
 
 def train(model, loader, optimizer, criterion, device):
     """
@@ -71,6 +62,11 @@ def valid(model, loader, criterion, device, y_transform=None):
         criterion: 损失函数。
         device: GPU 或 CPU。
         y_transform: 数据集中的HIC标签变换对象。若数据集中的HIC标签没有进行变换则为None。
+    返回:
+        avg_loss: 学生模型的回归损失（基于 criterion 计算）。
+        accuracy: 验证集的分类准确率。
+        mae: 验证集的平均绝对误差。
+        rmse: 验证集的均方根误差。
     """
     model.eval()
     loss_batch = []
@@ -112,6 +108,20 @@ def valid(model, loader, criterion, device, y_transform=None):
     HIC_trues = np.concatenate(all_HIC_trues)
     AIS_trues = np.concatenate(all_AIS_trues)
 
+    # assert HIC_preds.shape == HIC_trues.shape == AIS_trues.shape, (
+    #     f"预测/真实长度不一致: {HIC_preds.shape}, {HIC_trues.shape}, {AIS_trues.shape}"
+    # )
+
+    # AIS_from_HIC = AIS_cal(HIC_trues)
+    # assert np.array_equal(AIS_from_HIC, AIS_trues), (
+    #     f"真实 AIS 与 HIC 不匹配，可能存在错配！"
+    # )
+
+    # AIS_preds = AIS_cal(HIC_preds)
+    # assert AIS_preds.shape == AIS_trues.shape, (
+    #     f"AIS_preds 与 AIS_trues 长度不一致: {AIS_preds.shape} vs {AIS_trues.shape}"
+    # )
+
     # 检查 HIC_preds 和 HIC_trues 是否包含 inf 或异常值
     if np.isinf(HIC_preds).any() or np.isinf(HIC_trues).any():
         print("**Warning: HIC_preds or HIC_trues contains inf values. Replacing inf with large finite values.**")
@@ -148,24 +158,24 @@ if __name__ == "__main__":
     # 定义优化相关的超参数
     Epochs = 500
     Batch_size = 512
-    Learning_rate = 0.012  # 初始学习率 0.008-0.015
-    Learning_rate_min = 5e-7  # 余弦退火最小学习率
+    Learning_rate = 0.025  # 初始学习率 0.008-0.015
+    Learning_rate_min = 1e-6  # 余弦退火最小学习率
     weight_decay = 6e-4  # L2 正则化系数 2e-4 - 8e-4
-    Patience = 8  # 早停等待轮数 
-    base_loss = "mae" # mae or mse
-    weight_factor_classify = 1.8  # 加权损失函数的系数1 1.4-1.85
-    weight_factor_sample = 0.5  # 加权损失函数的系数2 0.3-0.8
+    Patience = 50 # 早停等待轮数
+    base_loss = "mae"  # mae or mse
+    weight_factor_classify = 3.6  # 加权损失函数的系数1 1.4-1.85
+    weight_factor_sample = 0.6  # 加权损失函数的系数2 0.3-0.8
     # 定义模型相关的超参数
-    Ksize_init = 6 # TCN 初始卷积核大小，必须是偶数 4-12
+    Ksize_init = 8 # TCN 初始卷积核大小，必须是偶数 4-12
     Ksize_mid = 3  # TCN 中间卷积核大小，必须是奇数 3 or 5
-    num_blocks_of_tcn = 6  # TCN 的块数 2 - 6
+    num_blocks_of_tcn = 3  # TCN 的块数 2 - 6
     num_layers_of_mlpE = 4  # MLP 编码器的层数 4-5
-    num_layers_of_mlpD = 5  # MLP 解码器的层数 4-5
-    mlpE_hidden = 256  # MLP 编码器的隐藏层维度 96 - 192
+    num_layers_of_mlpD = 4  # MLP 解码器的层数 4-5
+    mlpE_hidden = 160  # MLP 编码器的隐藏层维度 96 - 192
     mlpD_hidden = 128  # MLP 解码器的隐藏层维度 128 or 256
     encoder_output_dim = 96  # 编码器输出特征维度 64 or 96
     decoder_output_dim = 32  # 解码器输出特征维度 16 or 32 or 64
-    dropout = 0.1 # Dropout 概率 0.05-0.25
+    dropout = 0.20  # Dropout 概率 0.05-0.25
     # 是否使用 HIC 标签变换对象（暂时不使用）
     lower_bound = 0  # HIC 标签的下界
     upper_bound = 2500  # HIC 标签的上界

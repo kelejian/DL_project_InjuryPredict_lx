@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-# 2025.1.7
+import warnings
+warnings.filterwarnings('ignore')
 import os, json
 import time
 from datetime import datetime
@@ -16,17 +17,8 @@ from utils import models
 from utils.weighted_loss import weighted_loss
 from utils.dataset_prepare import SigmoidTransform, CrashDataset, AIS_cal
 
-#import wandb
-
-warnings.filterwarnings('ignore')
-
-# 定义随机种子
-seed = 2025
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
-random.seed(seed)
+from utils.set_random_seed import set_random_seed
+set_random_seed()
 
 def train_student(model, loader, optimizer, criterion, device):
     """
@@ -150,21 +142,21 @@ if __name__ == "__main__":
     # 定义优化相关的超参数
     Epochs = 500
     Batch_size = 512
-    Learning_rate = 0.01 # 初始学习率
-    Learning_rate_min = 5e-7  # 余弦退火最小学习率
-    weight_decay = 0.0001  # L2 正则化系数
-    Patience = 8  # 早停等待轮数
-    base_loss = "mae"  # "mae" 或 "mse"
-    weight_factor_classify = 1.7  # 加权损失函数的系数1
-    weight_factor_sample = 0.5  # 加权损失函数的系数2
+    Learning_rate = 0.024  # 初始学习率
+    Learning_rate_min = 2e-7  # 余弦退火最小学习率
+    weight_decay = 6e-4  # L2 正则化系数
+    Patience = 888  # 早停等待轮数
+    base_loss = "mae"  # 或 "mae"
+    weight_factor_classify = 3.0  # 加权损失函数的系数1
+    weight_factor_sample = 0.6  # 加权损失函数的系数2
     # 定义模型相关的超参数
     num_layers_of_mlpE = 4  # MLP 编码器的层数
-    num_layers_of_mlpD = 3  # MLP 解码器的层数
-    mlpE_hidden = 128  # MLP 编码器的隐藏层维度
+    num_layers_of_mlpD = 4  # MLP 解码器的层数
+    mlpE_hidden = 160  # MLP 编码器的隐藏层维度
     mlpD_hidden = 128  # MLP 解码器的隐藏层维度
     encoder_output_dim = 96  # 编码器输出特征维度
     decoder_output_dim = 32  # 解码器输出特征维度
-    dropout = 0.05  # Dropout 概率
+    dropout = 0.15  # Dropout 概率
     # 是否使用 HIC 标签变换对象
     lower_bound = 0  # HIC 标签的下界
     upper_bound = 2500  # HIC 标签的上界
@@ -237,7 +229,7 @@ if __name__ == "__main__":
         # 保存分类准确率最佳的模型
         if val_accuracy > Best_accu:
             Best_accu = val_accuracy
-            if Best_accu > 80:
+            if Best_accu > 50:
                 torch.save(model.state_dict(), os.path.join(run_dir, "student_best_accu.pth"))
                 print(f"Best model saved with val accuracy: {Best_accu:.2f}%")
 

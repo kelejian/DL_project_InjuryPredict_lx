@@ -1,6 +1,7 @@
 """ Test the TCN-based post-crash injury prediction model """
 # -*- coding: utf-8 -*-
-
+import warnings
+warnings.filterwarnings('ignore')
 import os, json
 import pandas as pd
 import torch
@@ -20,14 +21,8 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-# Define the random seed.
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-seed = 2025
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
-random.seed(seed)
+from utils.set_random_seed import set_random_seed
+set_random_seed()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -127,7 +122,7 @@ if __name__ == "__main__":
         test_dataset2 = torch.load("./data/test_dataset.pt")
         
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
 
     # 设备设置
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -255,15 +250,51 @@ if __name__ == "__main__":
 
     print(f"Results written to {markdown_file}")
 
+
+    # 混淆矩阵画成图
+    plt.figure(figsize=(8, 6))
+    plt.imshow(conf_mat_6c, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title('Confusion Matrix for AIS-6C', fontsize=16)
+    plt.colorbar()
+    tick_marks = np.arange(6)
+    plt.xticks(tick_marks, [0, 1, 2, 3, 4, 5], fontsize=12)
+    plt.yticks(tick_marks, [0, 1, 2, 3, 4, 5], fontsize=12)
+    plt.xlabel('Predicted Label', fontsize=14)
+    plt.ylabel('True Label', fontsize=14)
+    thresh = conf_mat_6c.max() / 2.
+    for i, j in np.ndindex(conf_mat_6c.shape):
+        plt.text(j, i, format(conf_mat_6c[i, j], 'd'),
+                 horizontalalignment="center",
+                 color="white" if conf_mat_6c[i, j] > thresh else "black",
+                 fontsize=12)
+    plt.tight_layout()
+    plt.savefig(os.path.join(args.run_dir, "AIS6C_confusion_matrix.png"))
+    plt.close()
+
     # 绘制散点图
     plt.figure(figsize=(8, 7))
-    plt.scatter(HIC_trues, HIC_preds, c='blue', alpha=0.5, label="Predictions vs Ground Truth")
-    plt.legend(fontsize=14)
+    
+    # 定义颜色映射
+    colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
+    AIS_trues = AIS_cal(HIC_trues)
+    ais_colors = [colors[min(ais, 5)] for ais in AIS_trues]
+
+    plt.scatter(HIC_trues, HIC_preds, c=ais_colors, alpha=0.5)
+
+    # 添加图例
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=colors[i], label=f'AIS {i}') for i in range(6) if i in AIS_trues]
+    plt.legend(handles=legend_elements, title='AIS LEVEL', loc='upper left')
+
+    # plt.legend(fontsize=14)
     plt.plot([0, 2500], [0, 2500], 'r--', label="Ideal Line")  # 理想预测线即 y = x
     plt.xlabel("Ground Truth (HIC)", fontsize=16)
     plt.ylabel("Predictions (HIC)", fontsize=16)
-    #plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
-    plt.legend()
+    plt.title("Scatter Plot of Predictions vs Ground Truth On Test Set") 
+    first_legend = plt.legend(handles=legend_elements, title='AIS LEVEL', loc='upper left')
+    plt.gca().add_artist(first_legend)
+    plt.legend(loc='lower right')
+
     plt.grid(True)
     plt.savefig(os.path.join(args.run_dir, "HIC_scatter_plot.png"))
     plt.show()

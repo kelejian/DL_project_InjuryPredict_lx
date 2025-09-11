@@ -33,11 +33,11 @@ def Piecewise_linear(y_true, y_pred, weight_add_mid=1.0):
     weight_adds[mask] = 0
     # 区间 5: y > 2500，权重按指数减少
     mask = y_true > 2500
-    weight_adds[mask] = -1 + torch.exp(-1e-4 * (y_true[mask] - 2500))
+    weight_adds[mask] = -1 + torch.exp(-2e-4 * (y_true[mask] - 2500))
 
     # 最后增加y_pred<0的权重惩罚
-    # mask_pred_neg = y_pred < 0
-    # weight_adds[mask_pred_neg] += weight_add_mid
+    mask_pred_neg = y_pred < 0
+    weight_adds[mask_pred_neg] += weight_add_mid
 
     return weight_adds# 生成 y_true 和 y_pred 的值
 
@@ -122,6 +122,9 @@ class weighted_loss(nn.Module):
             true_ais = self.AIS_cal(true_hic)
             weights_classify = self.weight_factor_classify ** torch.abs(pred_ais - true_ais)# 根据AIS-6C分类准确率计算样本权重, 分类错误的样本权重会被放大
             weights_mid = 1.0 + Piecewise_linear(true_hic, pred_hic, self.weight_factor_sample) # 根据HIC值区间范围计算样本权重, 中间HIC值的样本权重会被放大, 预测为负值的样本权重也会被放大
+        
+        # print(weights_classify)
+        # print(weights_mid)
 
         return weights_classify * weights_mid
 
@@ -138,10 +141,10 @@ class weighted_loss(nn.Module):
 if __name__ == '__main__':
     import numpy as np
     # Test the CombinedLoss class
-    pred_hic = torch.tensor([-50, 100, 1000.0, 5000.0], dtype=torch.float32)
+    pred_hic = torch.tensor([-50, 100, 1600.0, 5000.0], dtype=torch.float32)
     true_hic = torch.tensor([0, 50, 900.0, 10000.0], dtype=torch.float32)
     from dataset_prepare import SigmoidTransform
-    transform = SigmoidTransform(0, 2500)
+    # transform = SigmoidTransform(0, 2500)
     transform = None
     # pred_hic = transform.forward(pred_hic)
     # true_hic = transform.forward(true_hic)

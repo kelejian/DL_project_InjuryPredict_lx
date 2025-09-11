@@ -10,14 +10,13 @@ import random
 import numpy as np
 import warnings
 warnings.filterwarnings("ignore")
-# Define the random seed.
-#os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-seed = 2025
-torch.manual_seed(seed)
-torch.cuda.manual_seed_all(seed)
-torch.cuda.manual_seed(seed)
-np.random.seed(seed)
-random.seed(seed)
+
+try:
+    from utils.set_random_seed import set_random_seed  # 作为包导入时使用
+except ImportError:
+    from set_random_seed import set_random_seed   # 直接运行时使用
+
+set_random_seed()
 
 class SigmoidTransform(nn.Module): 
     """
@@ -129,7 +128,15 @@ class CrashDataset(Dataset):
         self.inputs = np.load(input_file)
         self.labels = np.load(label_file)
 
-        self.case_ids = self.inputs['case_ids'] # 形状 (N,)
+        # --- 新增：对齐校验 ---
+        inp_ids = self.inputs['case_ids']
+        lab_ids = self.labels['case_ids']
+        assert np.array_equal(inp_ids, lab_ids), (
+            f"Case ID 不匹配：input_file 中 {inp_ids[:5]}… vs label_file 中 {lab_ids[:5]}…"
+        )
+
+        # 只有校验通过才继续下面的赋值和预处理
+        self.case_ids = inp_ids # 形状 (N,)
 
         # 输入特征
         self.x_acc = self.inputs['waveforms'] # 形状 (N, 3, 150) acceleration waveforms
@@ -165,7 +172,7 @@ class CrashDataset(Dataset):
         数据预处理, 分别处理连续特征和离散特征
         """
         # 碰撞波形数据 (x_acc)
-        # 形状 (5777, 3, 150)，3 表示 X 和 Y 和 Z 方向，150 表示时间步长
+        # 形状 (N, 3, 150)，3 表示 X 和 Y 和 Z 方向，150 表示时间步长
         # 可能存在噪声，不够平滑，尤其是y和z方向
         # 对 X 和 Y 和 Z 方向的波形数据进行归一化
         for i in range(3):  # 分别处理 X 和 Y 和 Z 方向
@@ -194,7 +201,7 @@ class CrashDataset(Dataset):
         # 16: sp (连续) : 座椅前后位置 (SP - Seat Position) 有正负
         # 17: recline_angle (连续)  座椅靠背角度 (Recline angle) 有正负
 
-        self.continuous_indices = [0, 1, 4, 5, 6, 7, 8, 10, 12, 13, 15, 16, 17]  # 连续特征的索引
+        self.continuous_indices = [0, 1, 2, 4, 5, 6, 7, 8, 10, 12, 13, 15, 16, 17]  # 连续特征的索引
         self.discrete_indices = [3, 9, 11, 14]  # 离散特征的索引
 
         # 处理连续特征

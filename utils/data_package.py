@@ -130,6 +130,11 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path, downsa
     final_params = np.stack(processed_params, axis=0) # 形状 (N, 18)
     final_waveforms = np.stack(processed_waveforms, axis=0) # 形状 (N, 3, 150)
 
+    # 断言检查：输出 case_ids 顺序必须与传入的 case_id_list 一致
+    assert np.array_equal(final_case_ids, np.array(case_id_list, dtype=int)), (
+        f"case_ids 序列不匹配: 输出{final_case_ids[:5]} vs 输入{case_id_list[:5]}"
+    )
+
     np.savez(
         output_path,
         case_ids=final_case_ids,
@@ -204,17 +209,61 @@ if __name__ == '__main__':
     
     df = pd.read_excel(hic_summary_path)
 
-    # 筛选"是否t2=150ms"列为FALSE的行
+    # 筛选"是否t2=150ms"列为FALSE的行, 并提取对应的case编号和HIC15值
     filtered_df = df[df['是否t2=150ms'] == False]
 
-    # 提取case编号（整数）
     case_ids_need = filtered_df['case编号'].astype(int).tolist()
-
-    # 提取对应的HIC15值（浮点数）作为标签
     hic15_labels = filtered_df['HIC15值'].astype(float).values
+
     # 计算对应的AIS标签
     ais3_labels = AIS_3_cal_hic(hic15_labels)
     ais_labels = AIS_cal_hic(hic15_labels)
+
+    ############################################################################################
+    
+    # 统计标签分布
+    unique, counts = np.unique(ais_labels, return_counts=True)
+    label_distribution = dict(zip(unique, counts))
+    print(f"AIS标签分布: {label_distribution}")
+    
+    # 绘制碰撞速度和HIC的散点图
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    
+    all_params_data = np.load(params_path)
+    params_df = pd.DataFrame({
+        'case编号': all_params_data['case_id'],
+        '碰撞速度': all_params_data['impact_velocity'],
+    }).set_index('case编号')
+
+    # 确保数据顺序一一对应 - 按case_ids_need的顺序提取碰撞速度
+    impact_velocities = params_df.loc[case_ids_need, '碰撞速度'].values
+    
+    # # 验证数据对应关系
+    # print(f"数据验证: case_ids数量={len(case_ids_need)}, HIC数量={len(hic15_labels)}, 碰撞速度数量={len(impact_velocities)}, AIS数量={len(ais_labels)}")
+    
+    # 不同AIS等级使用不同颜色
+    plt.figure(figsize=(10, 6))
+    
+    # 定义颜色映射
+    colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
+    ais_colors = [colors[min(ais, 5)] for ais in ais_labels]
+    
+    # 创建散点图
+    scatter = plt.scatter(impact_velocities, hic15_labels, c=ais_colors, alpha=0.6, s=50)
+    
+    # 添加图例
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor=colors[i], label=f'AIS {i}') for i in range(6) if i in ais_labels]
+    plt.legend(handles=legend_elements, title='AIS LEVEL', loc='upper left')
+
+    plt.title('impact velocity vs HIC15')
+    plt.xlabel('impact velocity (km/h)')
+    plt.ylabel('HIC15')
+    plt.grid(True, alpha=0.3)
+    plt.show()
+    ############################################################################################
+
 
     print(f"筛选出的case数量: {len(case_ids_need)}")
 
@@ -227,7 +276,12 @@ if __name__ == '__main__':
     )
 
     print("\n打包标签数据...")
-    # 保存标签为npz文件
     labels_output_path = os.path.join(output_dir, 'hic15_labels.npz')
-    np.savez(labels_output_path, hic15=hic15_labels, ais3=ais3_labels, ais=ais_labels)
+    np.savez(
+        labels_output_path,
+        case_ids=case_ids_need,
+        hic15=hic15_labels,
+        ais3=ais3_labels,
+        ais=ais_labels
+    )
     print(f"对应的标签已保存至: {labels_output_path}")
