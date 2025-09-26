@@ -43,14 +43,13 @@ def train(model, loader, optimizer, criterion, device):
     #return np.mean(loss_batch)
 
 
-def valid(model, loader, criterion, device, y_transform=None):
+def valid(model, loader, criterion, device):
     """
     参数:
         model: 教师模型实例。
         loader: 数据加载器。
         criterion: 损失函数。
         device: GPU 或 CPU。
-        y_transform: 数据集中的HIC标签变换对象。若数据集中的HIC标签没有进行变换则为None。
     """
     model.eval()
     #loss_batch = []
@@ -73,11 +72,6 @@ def valid(model, loader, criterion, device, y_transform=None):
             # # 计算损失
             # loss = criterion(batch_pred_HIC, batch_y_HIC)
             # loss_batch.append(loss.item())
-
-            # 如果使用了 y_transform，需要将HIC 值反变换回原始范围以计算指标
-            if y_transform is not None:
-                batch_pred_HIC = y_transform.inverse(batch_pred_HIC)
-                batch_y_HIC = y_transform.inverse(batch_y_HIC)
 
             # 记录预测值和真实值
             all_HIC_preds.append(batch_pred_HIC.cpu().numpy())
@@ -136,20 +130,12 @@ def objective(trial):
     weight_factor_sample =trial.suggest_float("weight_factor_sample", 0.3, 0.8, step=0.1)
     Epochs = 500
     eta_min = 5e-6
-    # 是否使用 HIC 标签变换对象（暂时不使用）
-    lower_bound = 0
-    upper_bound = 2500
-    HIC_transform = None  # HIC 标签变换对象 或 SigmoidTransform(lower_bound, upper_bound)
 
     # 加载数据集对象
-    dataset = CrashDataset(y_transform=HIC_transform)
+    dataset = CrashDataset()
     # 从data文件夹直接加载数据集
-    if dataset.y_transform is None:
-        train_dataset = torch.load("./data/train_dataset.pt")
-        val_dataset = torch.load("./data/val_dataset.pt")
-    else:
-        train_dataset = torch.load("./data/train_dataset_ytrans.pt")
-        val_dataset = torch.load("./data/val_dataset_ytrans.pt")
+    train_dataset = torch.load("./data/train_dataset.pt")
+    val_dataset = torch.load("./data/val_dataset.pt")
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
@@ -185,7 +171,7 @@ def objective(trial):
 
         train(model, train_loader, optimizer, criterion, device)
         
-        val_accuracy, val_mae, val_rmse = valid(model, val_loader, criterion, device, y_transform=dataset.y_transform)
+        val_accuracy, val_mae, val_rmse = valid(model, val_loader, criterion, device)
 
         # prune_score = (val_mae * val_rmse) ** 0.5 
         # trial.report(prune_score , epoch) 

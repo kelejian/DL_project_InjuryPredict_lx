@@ -87,7 +87,7 @@ def train_distill(model, teacher_model, loader, optimizer, criterion, device, di
         np.mean(distill_decoder_loss_batch),
     )
 
-def valid_distill(model, loader, criterion, device, y_transform=None):
+def valid_distill(model, loader, criterion, device):
     """
     学生模型的验证函数。
 
@@ -96,7 +96,6 @@ def valid_distill(model, loader, criterion, device, y_transform=None):
         loader: 数据加载器。
         criterion: 损失函数。
         device: GPU 或 CPU。
-        y_transform: 数据集中的HIC标签变换对象。若数据集中的HIC标签没有进行变换则为None。
     返回:
         avg_loss: 学生模型的回归损失（基于 criterion 计算）。
         accuracy: 验证集的分类准确率。
@@ -123,11 +122,6 @@ def valid_distill(model, loader, criterion, device, y_transform=None):
             # 计算损失
             loss = criterion(batch_pred_HIC, batch_y_HIC)
             loss_batch.append(loss.item())
-
-            # 如果使用了 y_transform，需要将HIC 值反变换回原始范围以计算指标
-            if y_transform is not None:
-                batch_pred_HIC = y_transform.inverse(batch_pred_HIC)
-                batch_y_HIC = y_transform.inverse(batch_y_HIC)
 
             # 记录预测值和真实值
             all_HIC_preds.append(batch_pred_HIC.cpu().numpy())
@@ -205,22 +199,14 @@ if __name__ == "__main__":
     encoder_output_dim = teacher_hyperparams["encoder_output_dim"]  # 编码器输出特征维度
     decoder_output_dim = teacher_hyperparams["decoder_output_dim"]  # 解码器输出特征维度
     dropout = 0.15  # Dropout 概率
-    # 是否使用 HIC 标签变换对象
-    lower_bound = 0  # HIC 标签的下界
-    upper_bound = 2500  # HIC 标签的上界
-    HIC_transform = None  # HIC 标签变换对象 或 SigmoidTransform(lower_bound, upper_bound) 暂不用
     ############################################################################################
     ############################################################################################
 
     # 加载数据集对象
-    dataset = CrashDataset(y_transform=HIC_transform)
+    dataset = CrashDataset()
     # 从data文件夹直接加载数据集
-    if dataset.y_transform is None:
-        train_dataset = torch.load("./data/train_dataset.pt")
-        val_dataset = torch.load("./data/val_dataset.pt")
-    else:
-        train_dataset = torch.load("./data/train_dataset_ytrans.pt")
-        val_dataset = torch.load("./data/val_dataset_ytrans.pt")
+    train_dataset = torch.load("./data/train_dataset.pt")
+    val_dataset = torch.load("./data/val_dataset.pt")
 
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=Batch_size, shuffle=False, num_workers=0)
@@ -257,7 +243,7 @@ if __name__ == "__main__":
     teacher_model.eval()  # 教师模型固定，不更新参数
 
     # 定义损失函数、优化器和学习率调度器
-    criterion = weighted_loss(base_loss, weight_factor_classify, weight_factor_sample, dataset.y_transform)
+    criterion = weighted_loss(base_loss, weight_factor_classify, weight_factor_sample)
     optimizer = optim.AdamW(model.parameters(), lr=Learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=Epochs, eta_min=Learning_rate_min)
 
@@ -279,7 +265,7 @@ if __name__ == "__main__":
         print(f"Epoch {epoch+1}/{Epochs} | Train Loss: {train_loss:.3f} | Encoder Distill Loss: {distill_encoder_loss:.3f} | Decoder Distill Loss: {distill_decoder_loss:.3f}")
 
         # 验证模型
-        val_loss, val_accuracy, val_mae, val_rmse = valid_distill(model, val_loader, criterion, device, y_transform=dataset.y_transform)
+        val_loss, val_accuracy, val_mae, val_rmse = valid_distill(model, val_loader, criterion, device)
         LossCurve_val.append(val_loss)
         print(f"            | Val Loss: {val_loss:.3f} | Val Accuracy: {val_accuracy:.1f}% | MAE: {val_mae:.1f} | RMSE: {val_rmse:.1f}")
 
@@ -366,12 +352,6 @@ if __name__ == "__main__":
         results["hyperparameters related to training"]["base_loss"] = base_loss
         results["hyperparameters related to training"]["weight_factor_classify"] = weight_factor_classify
         results["hyperparameters related to training"]["weight_factor_sample"] = weight_factor_sample
-
-    if dataset.y_transform is not None:
-        results["hyperparameters related to training"]["HIC_transform"] = {
-            "lower_bound": dataset.y_transform.lower_bound,
-            "upper_bound": dataset.y_transform.upper_bound,
-        }
 
     with open(os.path.join(run_dir, "TrainingRecord.json"), "w") as f:
         json.dump(results, f, indent=4)

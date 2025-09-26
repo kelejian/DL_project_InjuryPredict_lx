@@ -18,51 +18,6 @@ except ImportError:
 
 set_random_seed()
 
-class SigmoidTransform(nn.Module): 
-    """
-    对标签值HIC进行 Sigmoid 变换和反变换。感兴趣范围被映射到[sigmoid(-2), sigmoid(2)]
-    相当于隐性地为不同HIC的样本在训练中加权
-    反变换容易数值溢出(比如原始HIC>12000, >10000后就有不小误差)
-    """
-    def __init__(self, lower_bound, upper_bound):
-        """
-        初始化 SigmoidTransform。
-        
-        参数:
-            lower_bound (float): 感兴趣范围的下界(如200)。
-            upper_bound (float): 感兴趣范围的上界(如2000)。
-        """
-        super(SigmoidTransform, self).__init__()
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-        self.a = 4 / (upper_bound - lower_bound)  # 缩放因子
-        self.b = -2 - self.a * lower_bound        # 偏移量
-
-    def forward(self, y):
-        """
-        对标签值进行 Sigmoid 变换。
-        
-        参数:
-            y (torch.Tensor): 输入标签值，形状为(B,)。
-        
-        返回:
-            torch.Tensor: 变换后的标签值，形状为(B,)。
-        """
-        return torch.sigmoid(self.a * y + self.b) 
-
-    def inverse(self, y_transformed):
-        """
-        对 Sigmoid 变换后的标签值进行反变换。
-        容易数值溢出(比如原始HIC>12000, >10000后就有不小误差)
-        
-        参数:
-            y_transformed (torch.Tensor): 变换后的标签值，形状为(B,)。
-        
-        返回:
-            torch.Tensor: 反变换后的标签值，形状为(B,)。
-        """
-        return (torch.log(y_transformed / (1 - y_transformed)) - self.b) / self.a
-
 # 经验公式计算AIS
 def AIS_3_cal(HIC):
     HIC = np.clip(HIC, 1, 2500)
@@ -118,12 +73,11 @@ def AIS_cal(HIC, prob_output=False):
         return AIS
     
 class CrashDataset(Dataset):
-    def __init__(self, input_file='./data/data_input.npz', label_file='./data/hic15_labels.npz', y_transform=None):
+    def __init__(self, input_file='./data/data_input.npz', label_file='./data/hic15_labels.npz'):
         """
         Args:
             input_file (str): 包含碰撞波形和特征数据的 .npz 文件路径。
             label_file (str): 包含标签数据的 .npz 文件路径。
-            y_transform (callable, optional): 可选是否对标签HIC值进行变换。默认为 None。
         """
         self.inputs = np.load(input_file)
         self.labels = np.load(label_file)
@@ -160,8 +114,6 @@ class CrashDataset(Dataset):
         # 存储每个离散特征的类别数
         self.num_classes_of_discrete = [
             len(self.label_encoders[idx].classes_) for idx in self.discrete_indices]
-
-        self.y_transform = y_transform
 
         # 关闭 npz 文件以避免 pickle 错误
         self.inputs.close()
@@ -242,10 +194,6 @@ class CrashDataset(Dataset):
 
         x_att_continuous = x_att[self.continuous_indices]  # 连续特征，形状 (12,)
         x_att_discrete = x_att[self.discrete_indices]      # 离散特征，形状 (4,)
-        
-        # 如果提供了标签变换函数，则对标签进行变换
-        if self.y_transform is not None:
-            y_HIC = self.y_transform(torch.tensor(y_HIC, dtype=torch.float32))
 
         return (
             torch.tensor(x_acc, dtype=torch.float32),          # 碰撞波形数据，float32
@@ -259,8 +207,7 @@ if __name__ == '__main__':
     import time
     # TEST
     start_time = time.time()
-    #HIC_transform = SigmoidTransform(0, 2500)
-    dataset = CrashDataset(y_transform=None)
+    dataset = CrashDataset()
     print("Dataset loading time:", time.time() - start_time)
 
     train_size = 500
@@ -269,15 +216,9 @@ if __name__ == '__main__':
 
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
 
-    # 把三者保存到本地
-    if dataset.y_transform is None:
-        torch.save(train_dataset, './data/train_dataset.pt')
-        torch.save(val_dataset, './data/val_dataset.pt')
-        torch.save(test_dataset, './data/test_dataset.pt')
-    else:
-        torch.save(train_dataset, './data/train_dataset_ytrans.pt')
-        torch.save(val_dataset, './data/val_dataset_ytrans.pt')
-        torch.save(test_dataset, './data/test_dataset_ytrans.pt')
+    torch.save(train_dataset, './data/train_dataset.pt')
+    torch.save(val_dataset, './data/val_dataset.pt')
+    torch.save(test_dataset, './data/test_dataset.pt')
 
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=0)

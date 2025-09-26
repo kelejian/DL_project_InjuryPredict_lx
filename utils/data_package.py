@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-def package_input_data(pulse_dir, params_path, case_id_list, output_path, downsample_indices=None):
+def package_input_data(pulse_dir, params_path, case_id_list, output_path):
     """
     处理、降采样并将指定案例的输入工况参数和波形数据打包在一起。
 
@@ -15,10 +15,7 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path, downsa
     :param params_path: 包含所有工况参数的 .npz 文件路径 (包含 'case_id' 列)。
     :param case_id_list: 需要处理的案例ID列表。
     :param output_path: 打包后的 .npz 文件保存路径。
-    :param downsample_indices: 用于降采样的索引数组。如果为None，则默认抽取200个点。
     """
-    if downsample_indices is None:
-        downsample_indices = np.arange(100, 20001, 100)
 
     # --- 1. 加载并索引工况参数 ---
     try:
@@ -74,18 +71,32 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path, downsa
                 print(f"警告：案例 {case_id} 的波形文件不完整，已跳过。")
                 continue
 
-            ax_full = pd.read_csv(x_path, sep='\t', header=None, usecols=[1]).values
-            ay_full = pd.read_csv(y_path, sep='\t', header=None, usecols=[1]).values
-            az_full = pd.read_csv(z_path, sep='\t', header=None, usecols=[1]).values
+            time = pd.read_csv(x_path, sep='\t', header=None, usecols=[0]).values.flatten()
+            total_length = len(time)
+            dt = np.mean(np.diff(time))
+            # ************************************************************************
+            if np.isclose(dt, 1e-5, atol=1e-7):
+                downsample_indices = np.arange(100, total_length, 100)
+            elif np.isclose(dt,  5e-6, atol=5e-8):
+                downsample_indices = np.arange(200, total_length, 200)
+            else:
+                raise ValueError(f"案例 {case_id} 的时间步长 {dt} 不符合预期。")
+            # ************************************************************************
+            # 读取完整波形数据
+            ax_full = pd.read_csv(x_path, sep='\t', header=None, usecols=[1]).values.flatten()
+            ay_full = pd.read_csv(y_path, sep='\t', header=None, usecols=[1]).values.flatten()
+            az_full = pd.read_csv(z_path, sep='\t', header=None, usecols=[1]).values.flatten()
 
             ax_sampled = ax_full[downsample_indices]
             ay_sampled = ay_full[downsample_indices]
             az_sampled = az_full[downsample_indices]
 
-            # 截掉150ms之后的点，保留前150个点
+            # ************************************************************************
+            # 只取前150个点
             ax_sampled = ax_sampled[:150]
-            ay_sampled = ay_sampled[:150]   
+            ay_sampled = ay_sampled[:150]
             az_sampled = az_sampled[:150]
+            # ************************************************************************
             
             waveforms_np = np.stack([ax_sampled, ay_sampled, az_sampled]).squeeze() # 形状 (3, 150), 通道维度在前，分别是 x, y, z，对应索引 0, 1, 2
 

@@ -16,7 +16,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score, root_mean_squared_error
 
 from utils import models
-from utils.dataset_prepare import CrashDataset, AIS_cal, AIS_3_cal, SigmoidTransform
+from utils.dataset_prepare import CrashDataset, AIS_cal, AIS_3_cal
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -26,13 +26,11 @@ set_random_seed()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def test(model, loader, y_transform=None):
+def test(model, loader):
     """
     参数:
         model: 模型实例。
         loader: 数据加载器。
-        y_transform: 数据集中的HIC标签变换对象。若数据集中的HIC标签没有进行变换则为None。
-
     返回:
         HIC_preds: 预测的 HIC 值。
         HIC_trues: 真实的 HIC 值。
@@ -54,11 +52,6 @@ def test(model, loader, y_transform=None):
                 batch_pred_HIC, _, _ = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
             elif isinstance(model, models.StudentModel):
                 batch_pred_HIC, _, _ = model(batch_x_att_continuous, batch_x_att_discrete)
-
-            # 如果使用了 y_transform，需要将HIC 值反变换回原始范围以计算指标
-            if y_transform is not None:
-                batch_pred_HIC = y_transform.inverse(batch_pred_HIC)
-                batch_y_HIC = y_transform.inverse(batch_y_HIC)
 
             # 记录预测值和真实值
             all_HIC_preds.append(batch_pred_HIC.cpu().numpy())
@@ -100,26 +93,12 @@ if __name__ == "__main__":
 
     # 提取训练相关的超参数
     train_params = training_record["hyperparameters related to training"]
-    # 提取 HIC_transform 参数
-    HIC_transform_params = train_params.get("HIC_transform")  # 如果没有这个键，返回 None
-
-    # 初始化 HIC_transform
-    if HIC_transform_params is not None:
-        HIC_transform = SigmoidTransform(
-            lower_bound=HIC_transform_params["lower_bound"],
-            upper_bound=HIC_transform_params["upper_bound"]
-        )
-    else:
-        HIC_transform = None  # 如果没有 HIC_transform 参数，设置为 None
 
     # 加载数据集
-    dataset = CrashDataset(y_transform=HIC_transform)
-    if dataset.y_transform is not None:
-        test_dataset1 = torch.load("./data/val_dataset_ytrans.pt")
-        test_dataset2 = torch.load("./data/test_dataset_ytrans.pt")
-    else:
-        test_dataset1 = torch.load("./data/val_dataset.pt")
-        test_dataset2 = torch.load("./data/test_dataset.pt")
+    dataset = CrashDataset()
+
+    test_dataset1 = torch.load("./data/val_dataset.pt")
+    test_dataset2 = torch.load("./data/test_dataset.pt")
         
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
@@ -164,7 +143,7 @@ if __name__ == "__main__":
     
     model.load_state_dict(torch.load(os.path.join(args.run_dir, args.weight_file)))
 
-    HIC_preds, HIC_trues = test(model, test_loader, y_transform=dataset.y_transform)
+    HIC_preds, HIC_trues = test(model, test_loader)
 
     # 找出预测差别最大的5条样本，打印其预测值和真实值
     diff = np.abs(HIC_preds - HIC_trues)

@@ -12,13 +12,12 @@ set_random_seed()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def test_inference_time(model, loader, y_transform=None):
+def test_inference_time(model, loader):
     """
     测试模型推理时间
     参数:
         model: 模型实例。
         loader: 数据加载器。
-        y_transform: 数据集中的HIC标签变换对象。若数据集中的HIC标签没有进行变换则为None。
     """
     model.eval()
     total_time = 0.0
@@ -82,26 +81,12 @@ if __name__ == "__main__":
 
     # 提取训练相关的超参数
     train_params = training_record["hyperparameters related to training"]
-    # 提取 HIC_transform 参数
-    HIC_transform_params = train_params.get("HIC_transform")  # 如果没有这个键，返回 None
-
-    # 初始化 HIC_transform
-    if HIC_transform_params is not None:
-        HIC_transform = SigmoidTransform(
-            lower_bound=HIC_transform_params["lower_bound"],
-            upper_bound=HIC_transform_params["upper_bound"]
-        )
-    else:
-        HIC_transform = None  # 如果没有 HIC_transform 参数，设置为 None
 
     # 加载数据集
-    dataset = CrashDataset(y_transform=HIC_transform)
-    if dataset.y_transform is not None:
-        test_dataset1 = torch.load("./data/val_dataset_ytrans.pt")
-        test_dataset2 = torch.load("./data/test_dataset_ytrans.pt")
-    else:
-        test_dataset1 = torch.load("./data/val_dataset.pt")
-        test_dataset2 = torch.load("./data/test_dataset.pt")
+    dataset = CrashDataset()
+
+    test_dataset1 = torch.load("./data/val_dataset.pt")
+    test_dataset2 = torch.load("./data/test_dataset.pt")
         
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
@@ -147,4 +132,4 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(os.path.join(args.run_dir, args.weight_file)))
 
     # 测试推理时间
-    test_inference_time(model, test_loader, y_transform=dataset.y_transform)
+    test_inference_time(model, test_loader)
