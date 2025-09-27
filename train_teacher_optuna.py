@@ -5,7 +5,8 @@ from torch import optim
 from torch.utils.data import DataLoader
 import random
 from utils import models
-from utils.dataset_prepare import CrashDataset, AIS_cal
+from utils.dataset_prepare import CrashDataset
+from utils.AIS_cal import AIS_3_cal_head, AIS_cal_head, AIS_cal_chest, AIS_cal_neck 
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from utils.weighted_loss import weighted_loss
 from optuna.trial import TrialState
@@ -93,7 +94,7 @@ def valid(model, loader, criterion, device):
         HIC_trues = np.nan_to_num(HIC_trues, nan=0.0, posinf=1e4, neginf=-1e4)
 
     # 计算准确率
-    AIS_preds = AIS_cal(HIC_preds)
+    AIS_preds = AIS_cal_head(HIC_preds)
     accuracy = 100. * (1 - np.count_nonzero(AIS_preds - AIS_trues) / len(AIS_trues))
 
     # 计算MAE, RMSE

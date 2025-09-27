@@ -63,7 +63,7 @@ class weighted_loss(nn.Module):
         self.weight_factor_classify = weight_factor_classify
         self.weight_factor_sample = weight_factor_sample
 
-    def AIS_cal(self, HIC):
+    def AIS_cal_head(self, HIC):
         """
         计算 AIS 等级(Torch 版本)
         
@@ -104,8 +104,8 @@ class weighted_loss(nn.Module):
         """
         样本权重函数。根据AIC-6C分类准确率和HIC值区间范围计算不同样本的权重
         """
-        pred_ais = self.AIS_cal(pred_hic)
-        true_ais = self.AIS_cal(true_hic)
+        pred_ais = self.AIS_cal_head(pred_hic)
+        true_ais = self.AIS_cal_head(true_hic)
         weights_classify = self.weight_factor_classify ** torch.abs(pred_ais - true_ais)# 根据AIS-6C分类准确率计算样本权重, 分类错误的样本权重会被放大
         weights_mid = 1.0 + Piecewise_linear(true_hic, pred_hic, self.weight_factor_sample) # 根据HIC值区间范围计算样本权重, 中间HIC值的样本权重会被放大, 预测为负值的样本权重也会被放大
 

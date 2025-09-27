@@ -2,6 +2,10 @@ import os
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+try:
+    from utils.AIS_cal import AIS_3_cal_head, AIS_cal_head, AIS_cal_chest, AIS_cal_neck  # 作为包导入时使用
+except ImportError:
+    from AIS_cal import AIS_3_cal_head, AIS_cal_head, AIS_cal_chest, AIS_cal_neck   # 直接运行时使用
 
 def package_input_data(pulse_dir, params_path, case_id_list, output_path):
     """
@@ -156,62 +160,6 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path):
     print(f"成功处理并打包的数据数目：{len(final_case_ids)}")
     print(f"打包后文件内容: case_ids shape={final_case_ids.shape}, params shape={final_params.shape}, waveforms shape={final_waveforms.shape}")
 
-
-# 经验公式计算AIS
-def AIS_3_cal_hic(HIC):
-    HIC = np.clip(HIC, 1, 2500)
-    coefficients = np.array([
-        [1.54, 0.00650],  # P(AIS≥1)
-        [3.39, 0.00372]   # P(AIS≥3)
-    ])
-    threshold = 0.2
-    c1 = coefficients[:, 0].reshape(-1, 1)
-    c2 = coefficients[:, 1].reshape(-1, 1)
-    HIC_inv = 200 / HIC
-    hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC))
-    AIS_3 = np.sum(hic_prob.T >= threshold, axis=1)
-    return AIS_3
-
-def AIS_cal_hic(HIC, prob_output=False):
-    # 限制 HIC 范围，防止数值不稳定
-    HIC = np.clip(HIC, 1, 2500)
-
-    # 定义常量和系数
-    coefficients = np.array([
-        [1.54, 0.00650],  # P(AIS≥1)
-        [2.49, 0.00483],  # P(AIS≥2)
-        [3.39, 0.00372],  # P(AIS≥3)
-        [4.90, 0.00351],  # P(AIS≥4)
-        [7.82, 0.00429]   # P(AIS≥5)
-    ])
-    threshold = 0.2  # 经验概率阈值
-
-    # 计算 P(AIS≥n) 的概率（向量化计算）
-    c1 = coefficients[:, 0].reshape(-1, 1)  # 系数1
-    c2 = coefficients[:, 1].reshape(-1, 1)  # 系数2
-    HIC_inv = 200 / HIC  # HIC 的倒数部分
-
-    # 计算所有 P(AIS≥n)
-    hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC))
-
-    # 计算 P(AIS=n) 的概率
-    ais_prob = np.zeros((len(HIC), 6))  # 初始化 (样本数, 6)
-    ais_prob[:, 0] = 1 - hic_prob[0]  # P(AIS=0)
-    ais_prob[:, 1] = hic_prob[0] - hic_prob[1]  # P(AIS=1)
-    ais_prob[:, 2] = hic_prob[1] - hic_prob[2]  # P(AIS=2)
-    ais_prob[:, 3] = hic_prob[2] - hic_prob[3]  # P(AIS=3)
-    ais_prob[:, 4] = hic_prob[3] - hic_prob[4]  # P(AIS=4)
-    ais_prob[:, 5] = hic_prob[4]  # P(AIS=5)
-
-    # 确定 AIS 等级
-    AIS = np.sum(hic_prob.T >= threshold, axis=1)
-
-    if prob_output:
-        return AIS, ais_prob
-    else:
-        return AIS
-  
-
 if __name__ == '__main__':
     pulse_dir = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\acceleration_data_all1800'
     params_path = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution_0825_final.npz'
@@ -225,22 +173,57 @@ if __name__ == '__main__':
 
     case_ids_need = filtered_df['case编号'].astype(int).tolist()
     hic15_labels = filtered_df['HIC15值'].astype(float).values
+    dmax_labels = filtered_df['Dmax值'].astype(float).values
+    nij_labels = filtered_df['Nij值'].astype(float).values
 
     # 计算对应的AIS标签
-    ais3_labels = AIS_3_cal_hic(hic15_labels)
-    ais_labels = AIS_cal_hic(hic15_labels)
+    ais3_head_labels = AIS_3_cal_head(hic15_labels)
+
+    ais_head_labels = AIS_cal_head(hic15_labels)
+    ais_chest_labels = AIS_cal_chest(dmax_labels)
+    ais_neck_labels = AIS_cal_neck(nij_labels)
+
+    # 计算MAIS
+    mais_labels = np.maximum.reduce([ais_head_labels, ais_chest_labels, ais_neck_labels])
 
     ############################################################################################
     
-    # 统计标签分布
-    unique, counts = np.unique(ais_labels, return_counts=True)
+    # 统计三种损伤值的AIS标签分布
+    unique, counts = np.unique(ais_head_labels, return_counts=True)
     label_distribution = dict(zip(unique, counts))
-    print(f"AIS标签分布: {label_distribution}")
-    
-    # 绘制碰撞速度和HIC的散点图
+    print(f"AIS头部标签分布: {label_distribution}")
+
+    unique, counts = np.unique(ais_chest_labels, return_counts=True)
+    label_distribution = dict(zip(unique, counts))
+    print(f"AIS胸部标签分布: {label_distribution}")
+
+    unique, counts = np.unique(ais_neck_labels, return_counts=True)
+    label_distribution = dict(zip(unique, counts))
+    print(f"AIS颈部标签分布: {label_distribution}")
+
+    unique, counts = np.unique(mais_labels, return_counts=True)
+    label_distribution = dict(zip(unique, counts))
+    print(f"MAIS标签分布: {label_distribution}")
+
+    ############################################################################################
+    # 绘制碰撞速度和HIC/Dmax/Nij的散点图
     import matplotlib.pyplot as plt
     import matplotlib.colors as mcolors
-    
+
+    # 设定是哪个部位的损伤
+    inj_loc = 'head'
+    if inj_loc == 'head':
+        inj_labels = hic15_labels
+        ais_labels = ais_head_labels
+    elif inj_loc == 'chest':
+        inj_labels = dmax_labels
+        ais_labels = ais_chest_labels
+    elif inj_loc == 'neck':
+        inj_labels = nij_labels
+        ais_labels = ais_neck_labels
+    else:
+        raise ValueError("inj_loc 必须是 'head', 'chest' 或 'neck'")
+
     all_params_data = np.load(params_path)
     params_df = pd.DataFrame({
         'case编号': all_params_data['case_id'],
@@ -250,27 +233,28 @@ if __name__ == '__main__':
     # 确保数据顺序一一对应 - 按case_ids_need的顺序提取碰撞速度
     impact_velocities = params_df.loc[case_ids_need, '碰撞速度'].values
     
-    # # 验证数据对应关系
-    # print(f"数据验证: case_ids数量={len(case_ids_need)}, HIC数量={len(hic15_labels)}, 碰撞速度数量={len(impact_velocities)}, AIS数量={len(ais_labels)}")
-    
     # 不同AIS等级使用不同颜色
     plt.figure(figsize=(10, 6))
-    
-    # 定义颜色映射
     colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
     ais_colors = [colors[min(ais, 5)] for ais in ais_labels]
     
     # 创建散点图
-    scatter = plt.scatter(impact_velocities, hic15_labels, c=ais_colors, alpha=0.6, s=50)
-    
+    scatter = plt.scatter(impact_velocities, inj_labels, c=ais_colors, alpha=0.6, s=50)
+
     # 添加图例
     from matplotlib.patches import Patch
     legend_elements = [Patch(facecolor=colors[i], label=f'AIS {i}') for i in range(6) if i in ais_labels]
     plt.legend(handles=legend_elements, title='AIS LEVEL', loc='upper left')
 
-    plt.title('impact velocity vs HIC15')
+    if inj_loc == 'head':
+        title = 'impact velocity vs HIC15'
+    elif inj_loc == 'chest':
+        title = 'impact velocity vs Dmax'
+    elif inj_loc == 'neck':
+        title = 'impact velocity vs Nij'
+    plt.title(title)
     plt.xlabel('impact velocity (km/h)')
-    plt.ylabel('HIC15')
+    plt.ylabel('Injury Severity Metric')
     plt.grid(True, alpha=0.3)
     plt.show()
     ############################################################################################
@@ -291,8 +275,12 @@ if __name__ == '__main__':
     np.savez(
         labels_output_path,
         case_ids=case_ids_need,
-        hic15=hic15_labels,
-        ais3=ais3_labels,
-        ais=ais_labels
+        HIC=hic15_labels,
+        Dmax=dmax_labels,
+        Nij=nij_labels,
+        AIS_head=ais_head_labels,
+        AIS_chest=ais_chest_labels,
+        AIS_neck=ais_neck_labels,
+        MAIS=mais_labels
     )
     print(f"对应的标签已保存至: {labels_output_path}")

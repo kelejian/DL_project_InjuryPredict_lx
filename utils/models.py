@@ -235,7 +235,7 @@ class TeacherModel(nn.Module):
 
         self.bn2 = nn.BatchNorm1d(decoder_output_dim) # 归一化解码器输出特征
         self.leaky_relu2 = nn.LeakyReLU()
-        self.fc = nn.Linear(decoder_output_dim, 1)  # 输出 HIC 预测值
+        self.fc = nn.Linear(decoder_output_dim, 3)  # 输出 HIC, Dmax, Nij 三个预测值
         
         # 初始化所有模型参数
         self._initialize_weights()
@@ -309,12 +309,12 @@ class TeacherModel(nn.Module):
         decoder_input = self.leaky_relu1(decoder_input)
         decoder_output = self.mlp_decoder(decoder_input)  # (B, decoder_output_dim)
 
-        # 6. 预测 HIC 值
+        # 6. 预测 HIC, Dmax, Nij 值
         regression_input = self.bn2(decoder_output)
         regression_input = self.leaky_relu2(regression_input)
-        hic_pred = self.fc(regression_input).squeeze(-1) # (B,)
+        predictions = self.fc(regression_input) # (B, 3)
 
-        return hic_pred, encoder_output, decoder_output
+        return predictions, encoder_output, decoder_output
 
 class StudentModel(nn.Module):
     def __init__(self, num_classes_of_discrete, 
@@ -378,7 +378,7 @@ class StudentModel(nn.Module):
 
         self.bn2 = nn.BatchNorm1d(decoder_output_dim) # 归一化解码器输出特征
         self.leaky_relu2 = nn.LeakyReLU()
-        self.fc = nn.Linear(decoder_output_dim, 1)  # 输出 HIC 预测值
+        self.fc = nn.Linear(decoder_output_dim, 3)  # 输出 HIC, Dmax, Nij 预测值
         
         self._initialize_weights()
         
@@ -437,6 +437,6 @@ class StudentModel(nn.Module):
         # 4. 预测 HIC 值
         regression_input = self.bn2(decoder_output)
         regression_input = self.leaky_relu2(regression_input)
-        hic_pred = self.fc(regression_input).squeeze(-1) # (B,)
+        predictions = self.fc(regression_input)  # (B, 3)
 
-        return hic_pred, encoder_output, decoder_output
+        return predictions, encoder_output, decoder_output

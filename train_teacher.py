@@ -15,9 +15,10 @@ from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 
 from utils import models
 from utils.weighted_loss import weighted_loss
-from utils.dataset_prepare import SigmoidTransform, CrashDataset, AIS_cal
-
+from utils.dataset_prepare import CrashDataset
+from utils.AIS_cal import AIS_3_cal_head, AIS_cal_head, AIS_cal_chest, AIS_cal_neck 
 from utils.set_random_seed import set_random_seed
+
 set_random_seed()
 
 def train(model, loader, optimizer, criterion, device):
@@ -106,12 +107,12 @@ def valid(model, loader, criterion, device):
     #     f"预测/真实长度不一致: {HIC_preds.shape}, {HIC_trues.shape}, {AIS_trues.shape}"
     # )
 
-    # AIS_from_HIC = AIS_cal(HIC_trues)
+    # AIS_from_HIC = AIS_cal_head(HIC_trues)
     # assert np.array_equal(AIS_from_HIC, AIS_trues), (
     #     f"真实 AIS 与 HIC 不匹配，可能存在错配！"
     # )
 
-    # AIS_preds = AIS_cal(HIC_preds)
+    # AIS_preds = AIS_cal_head(HIC_preds)
     # assert AIS_preds.shape == AIS_trues.shape, (
     #     f"AIS_preds 与 AIS_trues 长度不一致: {AIS_preds.shape} vs {AIS_trues.shape}"
     # )
@@ -123,7 +124,7 @@ def valid(model, loader, criterion, device):
         HIC_trues = np.nan_to_num(HIC_trues, nan=0.0, posinf=1e4, neginf=-1e4)
 
     # 计算准确率
-    AIS_preds = AIS_cal(HIC_preds)
+    AIS_preds = AIS_cal_head(HIC_preds)
     accuracy = 100. * (1 - np.count_nonzero(AIS_preds - AIS_trues) / len(AIS_trues))
 
     # 计算MAE, RMSE

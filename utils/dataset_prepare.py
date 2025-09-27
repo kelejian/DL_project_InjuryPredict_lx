@@ -1,6 +1,6 @@
 ''' This module includes data precessing dataset creating. '''
-# 2025.01.04
-
+import warnings
+warnings.filterwarnings("ignore")
 import os
 import torch
 from torch import nn
@@ -8,8 +8,6 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from sklearn.preprocessing import LabelEncoder
 import random
 import numpy as np
-import warnings
-warnings.filterwarnings("ignore")
 
 try:
     from utils.set_random_seed import set_random_seed  # 作为包导入时使用
@@ -18,60 +16,6 @@ except ImportError:
 
 set_random_seed()
 
-# 经验公式计算AIS
-def AIS_3_cal(HIC):
-    HIC = np.clip(HIC, 1, 2500)
-    coefficients = np.array([
-        [1.54, 0.00650],  # P(AIS≥1)
-        [3.39, 0.00372]   # P(AIS≥3)
-    ])
-    threshold = 0.2
-    c1 = coefficients[:, 0].reshape(-1, 1)
-    c2 = coefficients[:, 1].reshape(-1, 1)
-    HIC_inv = 200 / HIC
-    hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC))
-    AIS_3 = np.sum(hic_prob.T >= threshold, axis=1)
-    return AIS_3
-
-def AIS_cal(HIC, prob_output=False):
-    # 限制 HIC 范围，防止数值不稳定
-    HIC = np.clip(HIC, 1, 2500)
-
-    # 定义常量和系数
-    coefficients = np.array([
-        [1.54, 0.00650],  # P(AIS≥1)
-        [2.49, 0.00483],  # P(AIS≥2)
-        [3.39, 0.00372],  # P(AIS≥3)
-        [4.90, 0.00351],  # P(AIS≥4)
-        [7.82, 0.00429]   # P(AIS≥5)
-    ])
-    threshold = 0.2  # 经验概率阈值
-
-    # 计算 P(AIS≥n) 的概率（向量化计算）
-    c1 = coefficients[:, 0].reshape(-1, 1)  # 系数1
-    c2 = coefficients[:, 1].reshape(-1, 1)  # 系数2
-    HIC_inv = 200 / HIC  # HIC 的倒数部分
-
-    # 计算所有 P(AIS≥n)
-    hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC))
-
-    # 计算 P(AIS=n) 的概率
-    ais_prob = np.zeros((len(HIC), 6))  # 初始化 (样本数, 6)
-    ais_prob[:, 0] = 1 - hic_prob[0]  # P(AIS=0)
-    ais_prob[:, 1] = hic_prob[0] - hic_prob[1]  # P(AIS=1)
-    ais_prob[:, 2] = hic_prob[1] - hic_prob[2]  # P(AIS=2)
-    ais_prob[:, 3] = hic_prob[2] - hic_prob[3]  # P(AIS=3)
-    ais_prob[:, 4] = hic_prob[3] - hic_prob[4]  # P(AIS=4)
-    ais_prob[:, 5] = hic_prob[4]  # P(AIS=5)
-
-    # 确定 AIS 等级
-    AIS = np.sum(hic_prob.T >= threshold, axis=1)
-
-    if prob_output:
-        return AIS, ais_prob
-    else:
-        return AIS
-    
 class CrashDataset(Dataset):
     def __init__(self, input_file='./data/data_input.npz', label_file='./data/hic15_labels.npz'):
         """
@@ -96,9 +40,14 @@ class CrashDataset(Dataset):
         self.x_acc = self.inputs['waveforms'] # 形状 (N, 3, 150) acceleration waveforms
         self.x_att = self.inputs['params'] # 形状 (N, 18)  attributes
 
-        # 目标变量
-        self.y_HIC = self.labels['hic15']  # 形状 (N,)
-        self.y_AIS = self.labels['ais']  # 形状 (N,)
+        # --- 加载所有目标变量 ---
+        self.y_HIC = self.labels['HIC']
+        self.y_Dmax = self.labels['Dmax']
+        self.y_Nij = self.labels['Nij']
+        self.ais_head = self.labels['AIS_head']
+        self.ais_chest = self.labels['AIS_chest']
+        self.ais_neck = self.labels['AIS_neck']
+        self.mais = self.labels['MAIS']
 
         # 初始化 LabelEncoder 和映射关系存储
         self.label_encoders = {}  # 存储每个离散特征的 LabelEncoder
@@ -106,11 +55,7 @@ class CrashDataset(Dataset):
 
         # 数据预处理
         self._preprocess_data()
-      
-        # print(f"y_HIC中<100的值的数量: {len(np.where(self.y_HIC < 100)[0])}")
-        # print(f"y_HIC中>2000的值的数量: {len(np.where(self.y_HIC > 2000)[0])}")
-        # print(f"y_HIC最大值: {np.max(self.y_HIC)}")
-
+        
         # 存储每个离散特征的类别数
         self.num_classes_of_discrete = [
             len(self.label_encoders[idx].classes_) for idx in self.discrete_indices]
@@ -187,20 +132,33 @@ class CrashDataset(Dataset):
         """
         根据索引获取数据。
         """
-        x_acc = self.x_acc[idx]  # 碰撞波形数据，形状 (3, 150)
-        x_att = self.x_att[idx]  # 特征数据，形状 (18,)
-        y_HIC = self.y_HIC[idx]  # HIC 值，标量
-        y_AIS = self.y_AIS[idx]  # AIS 值，标量
+        x_acc = self.x_acc[idx]
+        x_att = self.x_att[idx]
+        
+        # --- 提取所有标签 ---
+        y_HIC = self.y_HIC[idx]
+        y_Dmax = self.y_Dmax[idx]
+        y_Nij = self.y_Nij[idx]
+        ais_head = self.ais_head[idx]
+        ais_chest = self.ais_chest[idx]
+        ais_neck = self.ais_neck[idx]
+        mais = self.mais[idx]
 
-        x_att_continuous = x_att[self.continuous_indices]  # 连续特征，形状 (12,)
-        x_att_discrete = x_att[self.discrete_indices]      # 离散特征，形状 (4,)
-
+        x_att_continuous = x_att[self.continuous_indices]
+        x_att_discrete = x_att[self.discrete_indices]
+        
         return (
-            torch.tensor(x_acc, dtype=torch.float32),          # 碰撞波形数据，float32
-            torch.tensor(x_att_continuous, dtype=torch.float32),  # 连续特征，float32
-            torch.tensor(x_att_discrete, dtype=torch.long),       # 离散特征，long
-            torch.tensor(y_HIC, dtype=torch.float32),          # HIC 值，float32
-            torch.tensor(y_AIS, dtype=torch.long)              # AIS 值，long
+            torch.tensor(x_acc, dtype=torch.float32),
+            torch.tensor(x_att_continuous, dtype=torch.float32),
+            torch.tensor(x_att_discrete, dtype=torch.long),
+            # --- 返回所有损伤指标和AIS等级 ---
+            torch.tensor(y_HIC, dtype=torch.float32),
+            torch.tensor(y_Dmax, dtype=torch.float32),
+            torch.tensor(y_Nij, dtype=torch.float32),
+            torch.tensor(ais_head, dtype=torch.long),
+            torch.tensor(ais_chest, dtype=torch.long),
+            torch.tensor(ais_neck, dtype=torch.long),
+            torch.tensor(mais, dtype=torch.long)
         )
 
 if __name__ == '__main__':
@@ -228,8 +186,15 @@ if __name__ == '__main__':
     
     batch_start_time = time.time()
     for i, batch in enumerate(train_loader):
+
+        (x_acc, x_att_continuous, x_att_discrete, 
+         y_HIC, y_Dmax, y_Nij, 
+         ais_head, ais_chest, ais_neck, mais) = batch
         
-        x_acc, x_att_continuous, x_att_discrete, y_HIC, y_AIS = batch
-        print(x_acc.shape, x_att_continuous.shape, x_att_discrete.shape, y_HIC.shape, y_AIS.shape)
+        print("x_acc shape:", x_acc.shape)
+        print("y_HIC shape:", y_HIC.shape)
+        print("y_Dmax shape:", y_Dmax.shape)
+        print("y_Nij shape:", y_Nij.shape)
+        print("MAIS shape:", mais.shape)
         break
     print("batch time:", time.time() - batch_start_time)

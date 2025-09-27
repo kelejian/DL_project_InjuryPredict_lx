@@ -16,7 +16,9 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error, mean_squared_error, r2_score, root_mean_squared_error
 
 from utils import models
-from utils.dataset_prepare import CrashDataset, AIS_cal, AIS_3_cal
+from utils.dataset_prepare import CrashDataset
+from utils.AIS_cal import AIS_3_cal_head, AIS_cal_head, AIS_cal_chest, AIS_cal_neck 
+
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -165,7 +167,7 @@ if __name__ == "__main__":
     print("决定系数 (R2):", r2)
 
     # AIS-6C评估指标
-    pred, true = AIS_cal(HIC_preds), AIS_cal(HIC_trues)
+    pred, true = AIS_cal_head(HIC_preds), AIS_cal_head(HIC_trues)
     accu_6c = 100. * (1 - np.count_nonzero(true - pred) / float(len(true)))
     conf_mat_6c = confusion_matrix(true, pred)
     G_mean_6c = geometric_mean_score(true, pred)
@@ -176,7 +178,7 @@ if __name__ == "__main__":
     print(report_6c)
 
     # AIS-3C评估指标
-    pred, true = AIS_3_cal(HIC_preds), AIS_3_cal(HIC_trues)
+    pred, true = AIS_3_cal_head(HIC_preds), AIS_3_cal_head(HIC_trues)
     accu_3c = 100. * (1 - np.count_nonzero(true - pred) / float(len(true)))
     conf_mat_3c = confusion_matrix(true, pred)
     G_mean_3c = geometric_mean_score(true, pred)
@@ -255,7 +257,7 @@ if __name__ == "__main__":
     
     # 定义颜色映射
     colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
-    AIS_trues = AIS_cal(HIC_trues)
+    AIS_trues = AIS_cal_head(HIC_trues)
     ais_colors = [colors[min(ais, 5)] for ais in AIS_trues]
 
     plt.scatter(HIC_trues, HIC_preds, c=ais_colors, alpha=0.5)
