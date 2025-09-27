@@ -53,15 +53,15 @@ def AIS_cal_head(HIC, prob_output=False):
     else:
         return AIS
 
-def AIS_cal_chest(C_disp, prob_output=False):
+def AIS_cal_chest(Dmax, prob_output=False):
     """
-    Calculate AIS level from Chest Displacement (C_disp).
+    Calculate AIS level from Chest Displacement (Dmax).
     Sets AIS to 0 for results less than AIS 2.
     """
-    # Clip C_disp range to prevent numerical instability
-    C_disp = np.clip(C_disp, 0.0, 500.0)
+    # Clip Dmax range to prevent numerical instability
+    Dmax = np.clip(Dmax, 0.0, 500.0)
 
-    # Define coefficients [c1, c2] for P(AIS>=n) = 1 / (1 + exp(c1 - c2 * C_disp))
+    # Define coefficients [c1, c2] for P(AIS>=n) = 1 / (1 + exp(c1 - c2 * Dmax))
     # Based on document rev_criteria2.pdf, page 73, eq. 4.4
     coefficients = np.array([
         [1.8706, 0.04439],  # P(AIS≥2)
@@ -76,23 +76,23 @@ def AIS_cal_chest(C_disp, prob_output=False):
     c2 = coefficients[:, 1].reshape(-1, 1)  # Slopes
     
     # Calculate all P(AIS≥n) for n=2,3,4,5
-    cdisp_prob = 1.0 / (1.0 + np.exp(c1 - c2 * C_disp))
+    Dmax_prob = 1.0 / (1.0 + np.exp(c1 - c2 * Dmax))
 
     # Determine AIS level based on threshold. If no threshold is passed (raw_ais=0), AIS is 0.
-    # AIS level based on cdisp : (2, 3, 4, 5)
-    # raw_ais = np.sum(cdisp_prob.T >= threshold, axis=1)
+    # AIS level based on Dmax : (2, 3, 4, 5)
+    # raw_ais = np.sum(Dmax_prob.T >= threshold, axis=1)
     # AIS = np.where(raw_ais > 0, raw_ais + 1, 0)
-    AIS = np.max(np.where(cdisp_prob.T >= threshold, np.arange(2, 6), 0), axis=1)
+    AIS = np.max(np.where(Dmax_prob.T >= threshold, np.arange(2, 6), 0), axis=1)
 
     if prob_output:
         # Calculate P(AIS=n) probabilities
-        ais_prob = np.zeros((len(C_disp), 6))  # Initialize for AIS levels 0 through 5
-        ais_prob[:, 0] = 1 - cdisp_prob[0]        # P(AIS<2)
+        ais_prob = np.zeros((len(Dmax), 6))  # Initialize for AIS levels 0 through 5
+        ais_prob[:, 0] = 1 - Dmax_prob[0]        # P(AIS<2)
         ais_prob[:, 1] = 0                        # No data available for P(AIS=1)
-        ais_prob[:, 2] = cdisp_prob[0] - cdisp_prob[1] # P(AIS=2)
-        ais_prob[:, 3] = cdisp_prob[1] - cdisp_prob[2] # P(AIS=3)
-        ais_prob[:, 4] = cdisp_prob[2] - cdisp_prob[3] # P(AIS=4)
-        ais_prob[:, 5] = cdisp_prob[3]            # P(AIS=5)
+        ais_prob[:, 2] = Dmax_prob[0] - Dmax_prob[1] # P(AIS=2)
+        ais_prob[:, 3] = Dmax_prob[1] - Dmax_prob[2] # P(AIS=3)
+        ais_prob[:, 4] = Dmax_prob[2] - Dmax_prob[3] # P(AIS=4)
+        ais_prob[:, 5] = Dmax_prob[3]            # P(AIS=5)
         return AIS, ais_prob
     else:
         return AIS 

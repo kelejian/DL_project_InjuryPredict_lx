@@ -39,5 +39,6 @@ Thumbs.db
 # 其他临时文件
 model_computation_graph
 test.py
+AIS_cal_test.py
 # data文件夹
 data/

@@ -16,39 +16,24 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path):
     保存到一个结构化的 .npz 文件中。
 
     :param pulse_dir: 存放原始波形CSV文件的目录。
-    :param params_path: 包含所有工况参数的 .npz 文件路径 (包含 'case_id' 列)。
+    :param params_path: 包含所有工况参数的 distribution 文件路径 (包含 'case_id' 列)。
     :param case_id_list: 需要处理的案例ID列表。
     :param output_path: 打包后的 .npz 文件保存路径。
     """
 
     # --- 1. 加载并索引工况参数 ---
-    try:
-        all_params_data = np.load(params_path)
-        # 使用 pandas DataFrame以便于通过 case_id 高效查找
-        params_df = pd.DataFrame({
-            'case_id': all_params_data['case_id'],
-            'impact_velocity': all_params_data['impact_velocity'],
-            'impact_angle': all_params_data['impact_angle'],
-            'overlap': all_params_data['overlap'],
-            'occupant_type': all_params_data['occupant_type'],
-            'll1': all_params_data['ll1'],
-            'll2': all_params_data['ll2'],
-            'btf': all_params_data['btf'],
-            'pp': all_params_data['pp'],
-            'plp': all_params_data['plp'],
-            'lla_status': all_params_data['lla_status'],
-            'llattf': all_params_data['llattf'],
-            'dz': all_params_data['dz'],
-            'ptf': all_params_data['ptf'],
-            'aft': all_params_data['aft'],
-            'aav_status': all_params_data['aav_status'],
-            'ttf': all_params_data['ttf'],
-            'sp': all_params_data['sp'],
-            'recline_angle': all_params_data['recline_angle']
-        }).set_index('case_id')
-    except Exception as e:
-        print(f"错误：加载或处理工况参数文件 '{params_path}' 时出错: {e}")
-        return
+    # 读取distribution文件
+    if params_path.endswith('.npz'):
+        distribution_npz = np.load(params_path, allow_pickle=True)
+        distribution_df = pd.DataFrame({
+                key: distribution_npz[key]
+                for key in distribution_npz.files
+            }).set_index('case_id', drop=False)
+    elif params_path.endswith('.csv'):
+        distribution_df = pd.read_csv(params_path)
+        distribution_df.set_index('case_id', inplace=True, drop=False)
+    else:
+        raise ValueError("Unsupported distribution file format. Use .csv or .npz")
 
     if not os.path.exists(os.path.dirname(output_path)):
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -161,20 +146,29 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path):
     print(f"打包后文件内容: case_ids shape={final_case_ids.shape}, params shape={final_params.shape}, waveforms shape={final_waveforms.shape}")
 
 if __name__ == '__main__':
-    pulse_dir = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\acceleration_data_all1800'
-    params_path = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution_0825_final.npz'
+    pulse_dir = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\acc_data_before0924'
+    params_path = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution\distribution_0927.csv'
     output_dir = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\DL_project_InjuryPredict\data'
-    hic_summary_path = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\DL_project_InjuryPredict\data\HIC15_summary.xlsx' 
+    # 读取distribution文件
+    if params_path.endswith('.npz'):
+        distribution_npz = np.load(params_path, allow_pickle=True)
+        distribution_df = pd.DataFrame({
+                key: distribution_npz[key]
+                for key in distribution_npz.files
+            }).set_index('case_id', drop=False)
+    elif params_path.endswith('.csv'):
+        distribution_df = pd.read_csv(params_path)
+        distribution_df.set_index('case_id', inplace=True, drop=False)
+    else:
+        raise ValueError("Unsupported distribution file format. Use .csv or .npz")
     
-    df = pd.read_excel(hic_summary_path)
+    # 筛选is_pulse_ok和is_injury_ok均为True的行, 并提取对应的case编号和HIC15值
+    filtered_df = distribution_df[(distribution_df['is_pulse_ok'] == True) & (distribution_df['is_injury_ok'] == True)]
 
-    # 筛选"是否t2=150ms"列为FALSE的行, 并提取对应的case编号和HIC15值
-    filtered_df = df[df['是否t2=150ms'] == False]
-
-    case_ids_need = filtered_df['case编号'].astype(int).tolist()
-    hic15_labels = filtered_df['HIC15值'].astype(float).values
-    dmax_labels = filtered_df['Dmax值'].astype(float).values
-    nij_labels = filtered_df['Nij值'].astype(float).values
+    case_ids_need = filtered_df['case_id'].astype(int).tolist()
+    hic15_labels = filtered_df['HIC15'].astype(float).values
+    dmax_labels = filtered_df['Dmax'].astype(float).values
+    nij_labels = filtered_df['Nij'].astype(float).values
 
     # 计算对应的AIS标签
     ais3_head_labels = AIS_3_cal_head(hic15_labels)
@@ -271,7 +265,7 @@ if __name__ == '__main__':
     )
 
     print("\n打包标签数据...")
-    labels_output_path = os.path.join(output_dir, 'hic15_labels.npz')
+    labels_output_path = os.path.join(output_dir, 'data_labels.npz')
     np.savez(
         labels_output_path,
         case_ids=case_ids_need,
