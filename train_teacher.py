@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'
 import warnings
 warnings.filterwarnings('ignore')
 import os, json
@@ -119,16 +121,16 @@ if __name__ == "__main__":
     # 1. 优化与训练相关
     Epochs = 1000
     Batch_size = 512
-    Learning_rate = 0.024
-    Learning_rate_min = 5e-6
+    Learning_rate = 0.022
+    Learning_rate_min = 1e-06
     weight_decay = 1e-3
     Patience = 1000 # 早停轮数
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 2.0
+    weight_factor_classify = 1.5
     weight_factor_sample = 0.5
-    loss_weights = (1.0, 1.0, 0.5) # HIC, Dmax, Nij 各自损失的权重
+    loss_weights = (1.0, 1.0, 1.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     Ksize_init = 8
@@ -142,6 +144,7 @@ if __name__ == "__main__":
     decoder_output_dim = 32
     dropout = 0.20
     use_channel_attention = True  # 是否使用通道注意力机制
+    fixed_channel_weight = [0.6, 0.35, 0.05]  # 固定的通道注意力权重(None表示自适应学习)
     ############################################################################################
     ############################################################################################
 
@@ -169,7 +172,8 @@ if __name__ == "__main__":
         encoder_output_dim=encoder_output_dim,
         decoder_output_dim=decoder_output_dim,
         dropout=dropout,
-        use_channel_attention=use_channel_attention
+        use_channel_attention=use_channel_attention,
+        fixed_channel_weight=fixed_channel_weight
     ).to(device)
 
     criterion = weighted_loss(base_loss, weight_factor_classify, weight_factor_sample, loss_weights)
@@ -177,7 +181,7 @@ if __name__ == "__main__":
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=Epochs, eta_min=Learning_rate_min)
 
     # 初始化跟踪变量
-    val_loss_history, val_mais_accu_history = [], []
+    val_loss_history, val_mais_accu_history, val_chest_accu_history, val_head_accu_history, val_neck_accu_history = [], [], [], [], []
     Best_val_loss = float('inf')
     Best_mais_accu, Best_chest_accu, Best_head_accu, Best_neck_accu = 0, 0, 0, 0
     Best_dmax_mae, Best_hic_mae, Best_nij_mae = float('inf'), float('inf'), float('inf')
@@ -221,6 +225,9 @@ if __name__ == "__main__":
         
         val_loss_history.append(val_metrics['loss'])
         val_mais_accu_history.append(val_metrics['accu_mais'])
+        val_head_accu_history.append(val_metrics['accu_head'])
+        val_chest_accu_history.append(val_metrics['accu_chest'])
+        val_neck_accu_history.append(val_metrics['accu_neck'])
 
         print(f"Epoch {epoch+1}/{Epochs} | Train Loss: {train_metrics['loss']:.3f}")
         print(f"            | Val Loss: {val_metrics['loss']:.3f} | MAIS Acc: {val_metrics['accu_mais']:.2f}%")
@@ -334,12 +341,13 @@ if __name__ == "__main__":
         if epoch > Epochs * 0.4 and len(val_loss_history) >= Patience:
             recent_losses = val_loss_history[-Patience:]
             recent_accu = val_mais_accu_history[-Patience:]
+            recent_accu_chest = val_chest_accu_history[-Patience:]
             
             loss_no_improve = all(loss >= Best_val_loss for loss in recent_losses)
             accu_no_improve = all(accu <= Best_mais_accu for accu in recent_accu)
-            Dmax_accu_no_improve = all(accu <= Best_dmax_mae for accu in recent_accu)
+            chest_accu_no_improve = all(accu <= Best_chest_accu for accu in recent_accu_chest)
 
-            if loss_no_improve and accu_no_improve and Dmax_accu_no_improve:
+            if loss_no_improve and accu_no_improve and chest_accu_no_improve:
                 print(f"Early Stop at epoch: {epoch+1}!")
                 print(f"Best MAIS accuracy: {Best_mais_accu:.2f}% (at epoch {best_MAIS_accu_epoch})")
                 print(f"Lowest Val Loss: {Best_val_loss:.3f} (at epoch {best_loss_epoch})")
@@ -388,6 +396,8 @@ if __name__ == "__main__":
                 "mlpE_hidden": mlpE_hidden, "mlpD_hidden": mlpD_hidden,
                 "encoder_output_dim": encoder_output_dim, "decoder_output_dim": decoder_output_dim,
                 "dropout": dropout,
+                "use_channel_attention": use_channel_attention,
+                "fixed_channel_weight": fixed_channel_weight
             }
         },
         "results": {

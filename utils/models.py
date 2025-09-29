@@ -46,12 +46,20 @@ class TemporalBlock(nn.Module):
         return out
 
 class ChannelAttention(nn.Module):
-    """通道注意力模块，用于对不同方向的碰撞波形进行自适应加权"""
-    def __init__(self, in_channels):
+    """通道注意力模块，用于对不同方向的碰撞波形进行自适应加权
+        也提供固定权重方案
+    """
+    def __init__(self, in_channels, fixed_weight=[0.7,0.2,0.1]):
         super(ChannelAttention, self).__init__()
         # 全局平均池化和最大池化
         self.avg_pool = nn.AdaptiveAvgPool1d(1)
         self.max_pool = nn.AdaptiveMaxPool1d(1)
+        if fixed_weight is not None:
+            assert len(fixed_weight) == in_channels, "fixed_weight长度必须等于in_channels"
+            self.fixed_weight = torch.tensor(fixed_weight).view(1, in_channels, 1)  # (1, C, 1)
+            self.fixed_weight = nn.Parameter(self.fixed_weight, requires_grad=False)  # 不更新权重
+        else:
+            self.fixed_weight = None
 
         # 共享的MLP
         self.fc1 = nn.Sequential(
@@ -71,6 +79,12 @@ class ChannelAttention(nn.Module):
 
     def forward(self, x):
         # x: (B, C, L)
+        if self.fixed_weight is not None:
+            attention = self.fixed_weight.to(x.device)  # 使用固定权重
+            self.epoch_attention_weights.append(attention.detach().cpu())
+            return x * attention  # (B, C, L) * (1, C, 1)
+        
+        # 自适应计算注意力权重
         avg_out = self.fc1(self.avg_pool(x))  # (B, C, 1)
         max_out = self.fc2(self.max_pool(abs(x)))  # (B, C, 1)
         out = avg_out + max_out
@@ -101,7 +115,7 @@ class ChannelAttention(nn.Module):
         return None
 
 class TemporalConvNet(nn.Module):
-    def __init__(self, in_channels, num_channels, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128, use_channel_attention=True):
+    def __init__(self, in_channels, num_channels, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128, use_channel_attention=True, fixed_channel_weight=None):
         """
         教师模型一部分, 负责提取X,Y加速度曲线特征(x_acc), 作为encoder一部分
         Args:
@@ -118,7 +132,7 @@ class TemporalConvNet(nn.Module):
         # 添加通道注意力
         self.use_channel_attention = use_channel_attention
         if use_channel_attention:
-            self.channel_attention = ChannelAttention(in_channels)
+            self.channel_attention = ChannelAttention(in_channels, fixed_weight=fixed_channel_weight)
 
         kernel_sizes = [Ksize_init] + [Ksize_mid] * (len(num_channels)-1)
 
@@ -231,7 +245,7 @@ class TeacherModel(nn.Module):
                  mlpE_hidden=128, mlpD_hidden=96, 
                  encoder_output_dim=128, decoder_output_dim=16, 
                  dropout=0.1, 
-                 use_channel_attention=True):
+                 use_channel_attention=True, fixed_channel_weight=None):
         """
         TeacherModel 的初始化。
 
@@ -270,7 +284,8 @@ class TeacherModel(nn.Module):
             Ksize_mid=Ksize_mid, 
             hidden=encoder_output_dim // 2, 
             dropout=dropout,
-            use_channel_attention=use_channel_attention
+            use_channel_attention=use_channel_attention,
+            fixed_channel_weight=fixed_channel_weight
         ) 
         #########################################
 

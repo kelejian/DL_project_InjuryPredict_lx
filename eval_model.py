@@ -181,7 +181,7 @@ def generate_report_section(title, reg_metrics, cls_metrics_6c, cls_metrics_3c=N
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate a trained injury prediction model")
     parser.add_argument("--run_dir", '-r', type=str, required=True, help="Directory of the training run to evaluate.")
-    parser.add_argument("--weight_file", '-w', type=str, default="teacher_best_mais_accu.pth", help="Name of the model weight file.")
+    parser.add_argument("--weight_file", '-w', type=str, default="best_mais_accu.pth", help="Name of the model weight file.")
     args = parser.parse_args()
 
     # --- 1. 加载模型和数据 ---
@@ -196,12 +196,12 @@ if __name__ == "__main__":
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
 
-    if "teacher" in args.weight_file.lower():
+    if "teacher" in args.run_dir.lower():
         model = models.TeacherModel(**model_params, num_classes_of_discrete=dataset.num_classes_of_discrete).to(device)
-    elif "student" in args.weight_file.lower():
+    elif "student" in args.run_dir.lower():
         model = models.StudentModel(**model_params, num_classes_of_discrete=dataset.num_classes_of_discrete).to(device)
     else:
-        raise ValueError("Weight file name must contain 'teacher' or 'student'.")
+        raise ValueError("run_dir name must contain 'teacher' or 'student'.")
     
     model.load_state_dict(torch.load(os.path.join(args.run_dir, args.weight_file)))
 

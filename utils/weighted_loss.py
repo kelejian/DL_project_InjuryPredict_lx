@@ -65,7 +65,7 @@ class weighted_loss(nn.Module):
         '''
         base_loss: str, 基础损失函数 'mse' 或 'mae'
         weight_factor_classify: float, 基于AIS分类的样本权重系数
-        weight_factor_sample: float, 中间值样本的权重系数
+        weight_factor_sample: float, 中间值样本的权重系数, 用于分段线性函数
         loss_weights: tuple, (w_hic, w_dmax, w_nij) 三个任务损失的权重
         '''
 
@@ -81,9 +81,9 @@ class weighted_loss(nn.Module):
         self.loss_weights = loss_weights
         
         # --- 为每个损伤部位定义分段加权超参数 ---
-        self.params_head = {'a': 120, 'b': 1550, 'c': 1800, 'd': 2250, 't': -0.5}
-        self.params_chest = {'a': 7.0, 'b': 175, 'c': 200, 'd': 240, 't': -0.5}
-        self.params_neck = {'a': 0.55, 'b': 2.45, 'c': 2.8, 'd': 3.5, 't': -0.5}
+        self.params_head = {'a': 60, 'b': 1600, 'c': 1800, 'd': 2000, 't': -0.5}
+        self.params_chest = {'a': 5.0, 'b': 175, 'c': 195, 'd': 220, 't': -0.5}
+        self.params_neck = {'a': 0.3, 'b': 2.0, 'c': 2.3, 'd': 2.75, 't': -0.5}
  
     def weighted_function(self, pred, true, injury_type):
         """

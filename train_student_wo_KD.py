@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import os
+os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'
 import warnings
 warnings.filterwarnings('ignore')
 import os, json
@@ -118,18 +120,18 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 优化与训练相关
-    Epochs = 1000
+    Epochs = 800
     Batch_size = 512
     Learning_rate = 0.024
-    Learning_rate_min = 2e-7
+    Learning_rate_min = 6e-7
     weight_decay = 6e-4
-    Patience = 300 # 早停轮数
+    Patience = 1000 # 早停轮数
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 3.0
+    weight_factor_classify = 2.0
     weight_factor_sample = 0.6
-    loss_weights = (0.8, 1.0, 0.2) # HIC, Dmax, Nij 各自损失的权重
+    loss_weights = (1.0, 1.0, 1.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     num_layers_of_mlpE = 4
@@ -166,7 +168,7 @@ if __name__ == "__main__":
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=Epochs, eta_min=Learning_rate_min)
 
     # 初始化跟踪变量
-    val_loss_history, val_mais_accu_history = [], []
+    val_loss_history, val_mais_accu_history, val_chest_accu_history, val_head_accu_history, val_neck_accu_history = [], [], [], [], []
     Best_val_loss = float('inf')
     Best_mais_accu, Best_chest_accu, Best_head_accu, Best_neck_accu = 0, 0, 0, 0
     Best_dmax_mae, Best_hic_mae, Best_nij_mae = float('inf'), float('inf'), float('inf')
@@ -184,6 +186,9 @@ if __name__ == "__main__":
         
         val_loss_history.append(val_metrics['loss'])
         val_mais_accu_history.append(val_metrics['accu_mais'])
+        val_head_accu_history.append(val_metrics['accu_head'])
+        val_chest_accu_history.append(val_metrics['accu_chest'])
+        val_neck_accu_history.append(val_metrics['accu_neck'])
 
         print(f"Epoch {epoch+1}/{Epochs} | Train Loss: {train_metrics['loss']:.3f}")
         print(f"            | Val Loss: {val_metrics['loss']:.3f} | MAIS Acc: {val_metrics['accu_mais']:.2f}%")
@@ -193,24 +198,23 @@ if __name__ == "__main__":
 
         # TensorBoard 记录 (训练)
         writer.add_scalar("Loss/Train", train_metrics['loss'], epoch)
-        writer.add_scalar("Accuracy/Train_MAIS", train_metrics['accu_mais'], epoch)
-        writer.add_scalar("Accuracy/Train_Head", train_metrics['accu_head'], epoch)
-        writer.add_scalar("Accuracy/Train_Chest", train_metrics['accu_chest'], epoch)
-        writer.add_scalar("Accuracy/Train_Neck", train_metrics['accu_neck'], epoch)
-        writer.add_scalar("MAE/Train_HIC", train_metrics['mae_hic'], epoch)
-        writer.add_scalar("MAE/Train_Dmax", train_metrics['mae_dmax'], epoch)
-        writer.add_scalar("MAE/Train_Nij", train_metrics['mae_nij'], epoch)
+        writer.add_scalar("Accuracy_Train/MAIS", train_metrics['accu_mais'], epoch)
+        writer.add_scalar("Accuracy_Train/Head", train_metrics['accu_head'], epoch)
+        writer.add_scalar("Accuracy_Train/Chest", train_metrics['accu_chest'], epoch)
+        writer.add_scalar("Accuracy_Train/Neck", train_metrics['accu_neck'], epoch)
+        writer.add_scalar("MAE_Train/Train_HIC", train_metrics['mae_hic'], epoch)
+        writer.add_scalar("MAE_Train/Train_Dmax", train_metrics['mae_dmax'], epoch)
+        writer.add_scalar("MAE_Train/Train_Nij", train_metrics['mae_nij'], epoch)
 
         # TensorBoard 记录 (验证)
         writer.add_scalar("Loss/Val", val_metrics['loss'], epoch)
-        
-        writer.add_scalar("Accuracy/Val_MAIS", val_metrics['accu_mais'], epoch)
-        writer.add_scalar("Accuracy/Val_Head", val_metrics['accu_head'], epoch)
-        writer.add_scalar("Accuracy/Val_Chest", val_metrics['accu_chest'], epoch)
-        writer.add_scalar("Accuracy/Val_Neck", val_metrics['accu_neck'], epoch)
-        writer.add_scalar("MAE/Val_HIC", val_metrics['mae_hic'], epoch)
-        writer.add_scalar("MAE/Val_Dmax", val_metrics['mae_dmax'], epoch)
-        writer.add_scalar("MAE/Val_Nij", val_metrics['mae_nij'], epoch)
+        writer.add_scalar("Accuracy_Val/MAIS", val_metrics['accu_mais'], epoch)
+        writer.add_scalar("Accuracy_Val/Head", val_metrics['accu_head'], epoch)
+        writer.add_scalar("Accuracy_Val/Chest", val_metrics['accu_chest'], epoch)
+        writer.add_scalar("Accuracy_Val/Neck", val_metrics['accu_neck'], epoch)
+        writer.add_scalar("MAE_Val/HIC", val_metrics['mae_hic'], epoch)
+        writer.add_scalar("MAE_Val/Dmax", val_metrics['mae_dmax'], epoch)
+        writer.add_scalar("MAE_Val/Nij", val_metrics['mae_nij'], epoch)
 
         model_save_configs = [
             # (metric_key, best_var_name, epoch_var_name, filename, format_str, compare_func)
@@ -244,12 +248,13 @@ if __name__ == "__main__":
         if epoch > Epochs * 0.4 and len(val_loss_history) >= Patience:
             recent_losses = val_loss_history[-Patience:]
             recent_accu = val_mais_accu_history[-Patience:]
+            recent_accu_chest = val_chest_accu_history[-Patience:]
             
             loss_no_improve = all(loss >= Best_val_loss for loss in recent_losses)
             accu_no_improve = all(accu <= Best_mais_accu for accu in recent_accu)
-            Dmax_accu_no_improve = all(accu <= Best_dmax_mae for accu in recent_accu)
+            chest_accu_no_improve = all(accu <= Best_chest_accu for accu in recent_accu_chest)
 
-            if loss_no_improve and accu_no_improve and Dmax_accu_no_improve:
+            if loss_no_improve and accu_no_improve and chest_accu_no_improve:
                 print(f"Early Stop at epoch: {epoch+1}!")
                 print(f"Best MAIS accuracy: {Best_mais_accu:.2f}% (at epoch {best_MAIS_accu_epoch})")
                 print(f"Lowest Val Loss: {Best_val_loss:.3f} (at epoch {best_loss_epoch})")
@@ -287,7 +292,9 @@ if __name__ == "__main__":
             {
                 "Epochs": Epochs, 
                 "Batch_size": Batch_size, 
-                "Learning_rate": Learning_rate, 
+                "Learning_rate": Learning_rate,
+                "Learning_rate_min": Learning_rate_min,
+                "weight_decay": weight_decay, 
                 "Patience": Patience},
             "loss": 
             {

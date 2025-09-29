@@ -147,7 +147,7 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path):
 
 if __name__ == '__main__':
     pulse_dir = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\acc_data_before0924'
-    params_path = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution\distribution_0927.csv'
+    params_path = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution\distribution_0929.csv'
     output_dir = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\DL_project_InjuryPredict\data'
     # 读取distribution文件
     if params_path.endswith('.npz'):
@@ -162,7 +162,7 @@ if __name__ == '__main__':
     else:
         raise ValueError("Unsupported distribution file format. Use .csv or .npz")
     
-    # 筛选is_pulse_ok和is_injury_ok均为True的行, 并提取对应的case编号和HIC15值
+    # 筛选is_pulse_ok和is_injury_ok均为True的行, 并提取对应的case编号和标签
     filtered_df = distribution_df[(distribution_df['is_pulse_ok'] == True) & (distribution_df['is_injury_ok'] == True)]
 
     case_ids_need = filtered_df['case_id'].astype(int).tolist()
@@ -205,70 +205,70 @@ if __name__ == '__main__':
     import matplotlib.colors as mcolors
 
     # 设定是哪个部位的损伤
-    inj_loc = 'head'
-    if inj_loc == 'head':
-        inj_labels = hic15_labels
-        ais_labels = ais_head_labels
-    elif inj_loc == 'chest':
-        inj_labels = dmax_labels
-        ais_labels = ais_chest_labels
-    elif inj_loc == 'neck':
-        inj_labels = nij_labels
-        ais_labels = ais_neck_labels
-    else:
-        raise ValueError("inj_loc 必须是 'head', 'chest' 或 'neck'")
+    for inj_loc in ['head', 'chest', 'neck']:
+        if inj_loc == 'head':
+            inj_labels = hic15_labels
+            ais_labels = ais_head_labels
+        elif inj_loc == 'chest':
+            inj_labels = dmax_labels
+            ais_labels = ais_chest_labels
+        elif inj_loc == 'neck':
+            inj_labels = nij_labels
+            ais_labels = ais_neck_labels
+        else:
+            raise ValueError("inj_loc 必须是 'head', 'chest' 或 'neck'")
 
-    # 确保数据顺序一一对应 - 按case_ids_need的顺序提取碰撞速度
-    impact_velocities = distribution_df.loc[case_ids_need, 'impact_velocity'].values
-    
-    # 不同AIS等级使用不同颜色
-    plt.figure(figsize=(10, 6))
-    colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
-    ais_colors = [colors[min(ais, 5)] for ais in ais_labels]
-    
-    # 创建散点图
-    scatter = plt.scatter(impact_velocities, inj_labels, c=ais_colors, alpha=0.6, s=50)
+        # 确保数据顺序一一对应 - 按case_ids_need的顺序提取碰撞速度
+        impact_velocities = distribution_df.loc[case_ids_need, 'impact_velocity'].values
+        
+        # 不同AIS等级使用不同颜色
+        plt.figure(figsize=(10, 6))
+        colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
+        ais_colors = [colors[min(ais, 5)] for ais in ais_labels]
+        
+        # 创建散点图
+        scatter = plt.scatter(impact_velocities, inj_labels, c=ais_colors, alpha=0.6, s=50)
 
-    # 添加图例
-    from matplotlib.patches import Patch
-    legend_elements = [Patch(facecolor=colors[i], label=f'AIS {i}') for i in range(6) if i in ais_labels]
-    plt.legend(handles=legend_elements, title='AIS LEVEL', loc='upper left')
+        # 添加图例
+        from matplotlib.patches import Patch
+        legend_elements = [Patch(facecolor=colors[i], label=f'AIS {i}') for i in range(6) if i in ais_labels]
+        plt.legend(handles=legend_elements, title='AIS LEVEL', loc='upper left')
 
-    if inj_loc == 'head':
-        title = 'impact velocity vs HIC15'
-    elif inj_loc == 'chest':
-        title = 'impact velocity vs Dmax'
-    elif inj_loc == 'neck':
-        title = 'impact velocity vs Nij'
-    plt.title(title)
-    plt.xlabel('impact velocity (km/h)')
-    plt.ylabel('Injury Severity Metric')
-    plt.grid(True, alpha=0.3)
+        if inj_loc == 'head':
+            title = 'impact velocity vs HIC15'
+        elif inj_loc == 'chest':
+            title = 'impact velocity vs Dmax'
+        elif inj_loc == 'neck':
+            title = 'impact velocity vs Nij'
+        plt.title(title)
+        plt.xlabel('impact velocity (km/h)')
+        plt.ylabel('Injury Severity Metric')
+        plt.grid(True, alpha=0.3)
     plt.show()
     ############################################################################################
 
 
-    print(f"筛选出的case数量: {len(case_ids_need)}")
+    # print(f"筛选出的case数量: {len(case_ids_need)}")
 
-    print("\n打包输入数据...")
-    package_input_data(
-        pulse_dir=pulse_dir,
-        params_path=params_path,
-        case_id_list=case_ids_need,
-        output_path=os.path.join(output_dir, 'data_input.npz')
-    )
+    # print("\n打包输入数据...")
+    # package_input_data(
+    #     pulse_dir=pulse_dir,
+    #     params_path=params_path,
+    #     case_id_list=case_ids_need,
+    #     output_path=os.path.join(output_dir, 'data_input.npz')
+    # )
 
-    print("\n打包标签数据...")
-    labels_output_path = os.path.join(output_dir, 'data_labels.npz')
-    np.savez(
-        labels_output_path,
-        case_ids=case_ids_need,
-        HIC=hic15_labels,
-        Dmax=dmax_labels,
-        Nij=nij_labels,
-        AIS_head=ais_head_labels,
-        AIS_chest=ais_chest_labels,
-        AIS_neck=ais_neck_labels,
-        MAIS=mais_labels
-    )
-    print(f"对应的标签已保存至: {labels_output_path}")
+    # print("\n打包标签数据...")
+    # labels_output_path = os.path.join(output_dir, 'data_labels.npz')
+    # np.savez(
+    #     labels_output_path,
+    #     case_ids=case_ids_need,
+    #     HIC=hic15_labels,
+    #     Dmax=dmax_labels,
+    #     Nij=nij_labels,
+    #     AIS_head=ais_head_labels,
+    #     AIS_chest=ais_chest_labels,
+    #     AIS_neck=ais_neck_labels,
+    #     MAIS=mais_labels
+    # )
+    # print(f"对应的标签已保存至: {labels_output_path}")

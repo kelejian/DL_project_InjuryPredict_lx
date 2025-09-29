@@ -89,7 +89,7 @@ def AIS_cal_chest(Dmax, Dmax_threshold=0.2):
 
     return AIS 
 
-def AIS_cal_neck(Nij, Nij_threshold=0.25):
+def AIS_cal_neck(Nij, Nij_threshold=0.17):
     """
     Calculate AIS level from Neck Injury Criterion (Nij).
     Sets AIS to 0 for results less than AIS 2.
