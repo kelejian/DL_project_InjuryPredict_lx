@@ -1,11 +1,14 @@
 import os
+os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'
+import warnings
+warnings.filterwarnings('ignore')
+import os
 import json
 import torch
 import time
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
 from utils import models
-# --- 修改: 移除不再使用的 SigmoidTransform ---
 from utils.dataset_prepare import CrashDataset
 
 from utils.set_random_seed import set_random_seed
@@ -65,14 +68,14 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Test Teacher or Student Model Inference Time")
     parser.add_argument("--run_dir", '-r', type=str, required=True, help="Directory of the training run.")
-    parser.add_argument("--weight_file", '-w', type=str, default="teacher_best_mais_accu.pth", help="Name of the model weight file.")
+    parser.add_argument("--weight_file", '-w', type=str, default="best_mais_accu.pth", help="Name of the model weight file.")
     args = parser.parse_args()
 
     # 加载超参数和训练记录
     with open(os.path.join(args.run_dir, "TrainingRecord.json"), "r") as f:
         training_record = json.load(f)
 
-    # --- 修改: 从新的JSON结构中提取模型超参数 ---
+    # --- 从JSON结构中提取模型超参数 ---
     model_params = training_record["hyperparameters"]["model"]
     
     # 加载数据集
@@ -82,22 +85,13 @@ if __name__ == "__main__":
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
 
-    # --- 修改: 根据模型类型加载模型 ---
-    if "teacher" in args.weight_file.lower():
+    # --- 根据模型类型加载模型 ---
+    if "teacher" in args.run_dir.lower():
         model = models.TeacherModel(
             num_classes_of_discrete=dataset.num_classes_of_discrete,
             **model_params
         ).to(device)
-    elif "student" in args.weight_file.lower():
-        # 如果是学生模型蒸馏而来, 部分参数可能需要从教师模型记录中获取
-        if "distill" in args.run_dir.lower():
-             teacher_run_dir = training_record["hyperparameters"]["teacher_model"]["run_dir"]
-             with open(os.path.join(teacher_run_dir, "TrainingRecord.json"), "r") as f_teacher:
-                 teacher_model_params = json.load(f_teacher)["hyperparameters"]["model"]
-             # 学生模型与教师模型共享编码器和解码器的输出维度
-             model_params["encoder_output_dim"] = teacher_model_params["encoder_output_dim"]
-             model_params["decoder_output_dim"] = teacher_model_params["decoder_output_dim"]
-
+    elif "student" in args.run_dir.lower():
         model = models.StudentModel(
             num_classes_of_discrete=dataset.num_classes_of_discrete,
             **model_params

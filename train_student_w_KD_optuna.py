@@ -3,7 +3,6 @@ import torch, os, json
 import numpy as np
 from torch import optim
 from torch.utils.data import DataLoader
-import random
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error, accuracy_score
 from optuna.storages import RDBStorage
 import joblib

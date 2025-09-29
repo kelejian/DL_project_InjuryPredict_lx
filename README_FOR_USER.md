@@ -51,10 +51,10 @@ python utils/dataset\_prepare.py
 **示例:**
 
 * **评估一个教师模型:**  
-  python eval\_model.py \-r ./runs/TeacherModel\_Train\_XXXXXXXX \-w teacher\_best\_mais\_accu.pth
+  python eval\_model.py \-r ./runs/TeacherModel\_XXXXXXXX \-w best\_mais\_accu.pth
 
 * **评估一个学生模型:**  
-  python eval\_model.py \-r ./runs/StudentModel\_Distill\_XXXXXXXX \-w student\_best\_mais\_accu.pth
+  python eval\_model.py \-r ./runs/StudentModel\_Distill\_XXXXXXXX \-w best\_mais\_accu.pth
 
 请将 XXXXXXXX 替换为您实际的运行目录的时间戳。
 
