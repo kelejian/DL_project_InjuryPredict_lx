@@ -17,7 +17,7 @@ except ImportError:
 set_random_seed()
 
 class CrashDataset(Dataset):
-    def __init__(self, input_file='./data/data_input.npz', label_file='./data/hic15_labels.npz'):
+    def __init__(self, input_file='./data/data_input.npz', label_file='./data/data_labels.npz'):
         """
         Args:
             input_file (str): 包含碰撞波形和特征数据的 .npz 文件路径。
@@ -162,14 +162,15 @@ class CrashDataset(Dataset):
         )
 
 if __name__ == '__main__':
+
+    # 分割打包数据集并测试
     import time
-    # TEST
     start_time = time.time()
     dataset = CrashDataset()
     print("Dataset loading time:", time.time() - start_time)
 
-    train_size = 500
-    val_size = 100
+    train_size = int(0.8 * len(dataset))
+    val_size = int(0.19 * len(dataset))
     test_size = len(dataset) - train_size - val_size
 
     train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])

@@ -45,8 +45,63 @@ class TemporalBlock(nn.Module):
         out = self.relu(out)
         return out
 
+class ChannelAttention(nn.Module):
+    """通道注意力模块，用于对不同方向的碰撞波形进行自适应加权"""
+    def __init__(self, in_channels):
+        super(ChannelAttention, self).__init__()
+        # 全局平均池化和最大池化
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+
+        # 共享的MLP
+        self.fc1 = nn.Sequential(
+            nn.Conv1d(in_channels, in_channels * 2, 1, bias=True),
+            nn.LeakyReLU(),
+            nn.Conv1d(in_channels * 2, in_channels, 1, bias=True),
+        )
+        self.fc2 = nn.Sequential(
+            nn.Conv1d(in_channels, in_channels * 2, 1, bias=True),
+            nn.LeakyReLU(),
+            nn.Conv1d(in_channels * 2, in_channels, 1, bias=True),
+        )
+        self.sigmoid = nn.Sigmoid()
+
+        # 用于记录整个epoch的注意力权重
+        self.epoch_attention_weights = []
+
+    def forward(self, x):
+        # x: (B, C, L)
+        avg_out = self.fc1(self.avg_pool(x))  # (B, C, 1)
+        max_out = self.fc2(self.max_pool(abs(x)))  # (B, C, 1)
+        out = avg_out + max_out
+        attention = self.sigmoid(out)  # (B, C, 1)
+
+        # 记录当前batch的注意力权重
+        self.epoch_attention_weights.append(attention.detach().cpu())
+        
+        return x * attention
+
+    def get_epoch_attention_stats(self):
+        """获取整个epoch的注意力权重统计信息"""
+        if self.epoch_attention_weights:
+            all_weights = torch.cat(self.epoch_attention_weights, dim=0)
+            mean_weights = all_weights.mean(dim=0).squeeze(-1)  # (C,)
+            std_weights = all_weights.std(dim=0).squeeze(-1)   # (C,)
+            return mean_weights, std_weights
+        return None, None
+    
+    def reset_epoch_records(self):
+        """重置epoch记录，在每个epoch开始时调用"""
+        self.epoch_attention_weights = []
+    
+    def get_epoch_attention_weights(self):
+        """获取整个epoch的所有注意力权重"""
+        if self.epoch_attention_weights:
+            return torch.cat(self.epoch_attention_weights, dim=0).squeeze(-1)  # (Total_samples, C)
+        return None
+
 class TemporalConvNet(nn.Module):
-    def __init__(self, in_channels, num_channels, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128):
+    def __init__(self, in_channels, num_channels, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128, use_channel_attention=True):
         """
         教师模型一部分, 负责提取X,Y加速度曲线特征(x_acc), 作为encoder一部分
         Args:
@@ -56,8 +111,14 @@ class TemporalConvNet(nn.Module):
             Ksize_mid (int): 中间卷积核大小。默认为 3。
             dropout (float): 默认为 0.1。
             hidden (int): 最终输出的特征维度。默认为 128。
+            use_channel_attention (bool): 是否使用通道注意力机制。默认为 True。
         """
         super(TemporalConvNet, self).__init__()
+
+        # 添加通道注意力
+        self.use_channel_attention = use_channel_attention
+        if use_channel_attention:
+            self.channel_attention = ChannelAttention(in_channels)
 
         kernel_sizes = [Ksize_init] + [Ksize_mid] * (len(num_channels)-1)
 
@@ -107,6 +168,9 @@ class TemporalConvNet(nn.Module):
         Returns:
             torch.Tensor: 输出张量,形状为 (B, hidden)
         """
+        # 首先应用通道注意力
+        if self.use_channel_attention:
+            x = self.channel_attention(x)  # 对X、Y、Z方向自适应加权
         # 初始卷积层（下采样）
         x = self.initial_conv(x)  # 输出形状: (B, num_channels[0], L/2)
         # TemporalBlock 堆叠
@@ -165,8 +229,9 @@ class TeacherModel(nn.Module):
                  Ksize_init=6, Ksize_mid=3,
                  num_blocks_of_tcn=4, num_layers_of_mlpE=4, num_layers_of_mlpD=4, 
                  mlpE_hidden=128, mlpD_hidden=96, 
-                 encoder_output_dim =128, decoder_output_dim=16, 
-                 dropout=0.1):
+                 encoder_output_dim=128, decoder_output_dim=16, 
+                 dropout=0.1, 
+                 use_channel_attention=True):
         """
         TeacherModel 的初始化。
 
@@ -181,28 +246,42 @@ class TeacherModel(nn.Module):
             mlpD_hidden (int): MLP 解码器的隐藏层维度。
             encoder_output_dim  (int): 编码器的输出特征维度。用于蒸馏。
             decoder_output_dim (int): 解码器的输出特征维度。用于蒸馏。
+            dropout (float): MLP模块的Dropout 概率。
+            use_channel_attention (bool): 是否使用通道注意力机制。
         """
         super(TeacherModel, self).__init__()
 
         # 离散特征嵌入层
         self.discrete_embedding = DiscreteFeatureEmbedding(num_classes_of_discrete)
 
-        # TCN 编码器，处理 x_acc
+        # TCN 编码器，处理 x_acc，现在支持通道注意力
         if num_blocks_of_tcn < 2:
             raise ValueError("num_blocks_of_tcn 必须大于等于 2")
         elif num_blocks_of_tcn >=2 and num_blocks_of_tcn <= 4:
             num_channels = [64, 128] + [256] * (num_blocks_of_tcn - 2)
         elif num_blocks_of_tcn >= 5:
             num_channels = [64, 128] + [256] * (num_blocks_of_tcn - 3) + [512]
+
         #########################################
-        self.tcn = TemporalConvNet(in_channels=3, num_channels=num_channels, Ksize_init=Ksize_init, Ksize_mid=Ksize_mid, hidden=encoder_output_dim  // 2, dropout=dropout) # 注意输入通道数!!!!!
+        self.tcn = TemporalConvNet(
+            in_channels=3, # 注意输入通道数!!!!!
+            num_channels=num_channels, 
+            Ksize_init=Ksize_init, 
+            Ksize_mid=Ksize_mid, 
+            hidden=encoder_output_dim // 2, 
+            dropout=dropout,
+            use_channel_attention=use_channel_attention
+        ) 
         #########################################
+
         # MLP 编码器，处理连续特征和离散特征的嵌入
         if num_layers_of_mlpE < 2:
             raise ValueError("num_layers_of_mlpE 必须大于等于 2")
+        
         ###################################
         mlp_encoder_input_dim = 14 + sum(num_classes_of_discrete) - len(num_classes_of_discrete)  # 14个连续特征 + 离散特征嵌入 
         ###################################
+
         self.mlp_encoder = PygMLP(
             in_channels=mlp_encoder_input_dim, 
             hidden_channels=mlpE_hidden,

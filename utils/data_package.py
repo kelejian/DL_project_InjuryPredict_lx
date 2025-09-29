@@ -25,13 +25,13 @@ def package_input_data(pulse_dir, params_path, case_id_list, output_path):
     # 读取distribution文件
     if params_path.endswith('.npz'):
         distribution_npz = np.load(params_path, allow_pickle=True)
-        distribution_df = pd.DataFrame({
+        params_df = pd.DataFrame({
                 key: distribution_npz[key]
                 for key in distribution_npz.files
             }).set_index('case_id', drop=False)
     elif params_path.endswith('.csv'):
-        distribution_df = pd.read_csv(params_path)
-        distribution_df.set_index('case_id', inplace=True, drop=False)
+        params_df = pd.read_csv(params_path)
+        params_df.set_index('case_id', inplace=True, drop=False)
     else:
         raise ValueError("Unsupported distribution file format. Use .csv or .npz")
 
@@ -218,14 +218,8 @@ if __name__ == '__main__':
     else:
         raise ValueError("inj_loc 必须是 'head', 'chest' 或 'neck'")
 
-    all_params_data = np.load(params_path)
-    params_df = pd.DataFrame({
-        'case编号': all_params_data['case_id'],
-        '碰撞速度': all_params_data['impact_velocity'],
-    }).set_index('case编号')
-
     # 确保数据顺序一一对应 - 按case_ids_need的顺序提取碰撞速度
-    impact_velocities = params_df.loc[case_ids_need, '碰撞速度'].values
+    impact_velocities = distribution_df.loc[case_ids_need, 'impact_velocity'].values
     
     # 不同AIS等级使用不同颜色
     plt.figure(figsize=(10, 6))

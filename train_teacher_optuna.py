@@ -4,272 +4,196 @@ import numpy as np
 from torch import optim
 from torch.utils.data import DataLoader
 import random
+from sklearn.metrics import mean_absolute_error, root_mean_squared_error, accuracy_score
+from optuna.storages import RDBStorage
+import joblib
+
 from utils import models
 from utils.dataset_prepare import CrashDataset
-from utils.AIS_cal import AIS_3_cal_head, AIS_cal_head, AIS_cal_chest, AIS_cal_neck 
-from sklearn.metrics import mean_absolute_error, root_mean_squared_error
+from utils.AIS_cal import AIS_cal_head, AIS_cal_chest, AIS_cal_neck 
 from utils.weighted_loss import weighted_loss
-from optuna.trial import TrialState
-import joblib
-from optuna import TrialPruned
-from optuna.storages import RDBStorage
-
 from utils.set_random_seed import set_random_seed
+
 set_random_seed()
 
-def train(model, loader, optimizer, criterion, device):
-    model.train()
-    #loss_batch = []
-    for batch_x_acc, batch_x_att_continuous, batch_x_att_discrete, batch_y_HIC, _ in loader:
-        # 将数据移动到设备
-        batch_x_acc = batch_x_acc.to(device)
-        batch_x_att_continuous = batch_x_att_continuous.to(device)
-        batch_x_att_discrete = batch_x_att_discrete.to(device)
-        batch_y_HIC = batch_y_HIC.to(device)
-
-        # 前向传播
-        batch_pred_HIC, encoder_output, decoder_output = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
-
-        # 计算损失
-        loss = criterion(batch_pred_HIC, batch_y_HIC)
-
-        # 反向传播和优化
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        # 记录损失
-        #loss_batch.append(loss.item())
-
-    #return np.mean(loss_batch)
-
-
-def valid(model, loader, criterion, device):
+# --- 新增: 采用与 train_teacher.py 一致的统一评估函数 ---
+def run_one_epoch(model, loader, criterion, device, optimizer=None):
     """
-    参数:
-        model: 教师模型实例。
-        loader: 数据加载器。
-        criterion: 损失函数。
-        device: GPU 或 CPU。
+    执行一个完整的训练或验证周期。
     """
-    model.eval()
-    #loss_batch = []
-    all_HIC_preds = []
-    all_HIC_trues = []
-    all_AIS_trues = []
+    is_train = optimizer is not None
+    if is_train:
+        model.train()
+    else:
+        model.eval()
 
-    with torch.no_grad():
-        for batch_x_acc, batch_x_att_continuous, batch_x_att_discrete, batch_y_HIC, batch_y_AIS in loader:
-            # 将数据移动到设备
-            batch_x_acc = batch_x_acc.to(device)
-            batch_x_att_continuous = batch_x_att_continuous.to(device)
-            batch_x_att_discrete = batch_x_att_discrete.to(device)
-            batch_y_HIC = batch_y_HIC.to(device)
-            batch_y_AIS = batch_y_AIS.to(device)
+    loss_batch = []
+    all_preds, all_trues = [], []
+    all_true_ais_head, all_true_ais_chest, all_true_ais_neck, all_true_mais = [], [], [], []
+    
+    with torch.set_grad_enabled(is_train):
+        for batch in loader:
+            (batch_x_acc, batch_x_att_continuous, batch_x_att_discrete,
+             batch_y_HIC, batch_y_Dmax, batch_y_Nij,
+             batch_ais_head, batch_ais_chest, batch_ais_neck, batch_y_MAIS) = [d.to(device) for d in batch]
 
-            # 前向传播
-            batch_pred_HIC, _, _ = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
+            batch_y_true = torch.stack([batch_y_HIC, batch_y_Dmax, batch_y_Nij], dim=1)
+            batch_pred, _, _ = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
+            loss = criterion(batch_pred, batch_y_true)
 
-            # # 计算损失
-            # loss = criterion(batch_pred_HIC, batch_y_HIC)
-            # loss_batch.append(loss.item())
+            if is_train:
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-            # 记录预测值和真实值
-            all_HIC_preds.append(batch_pred_HIC.cpu().numpy())
-            all_HIC_trues.append(batch_y_HIC.cpu().numpy())
-            all_AIS_trues.append(batch_y_AIS.cpu().numpy())
+            loss_batch.append(loss.item())
+            all_preds.append(batch_pred.detach().cpu().numpy())
+            all_trues.append(batch_y_true.detach().cpu().numpy())
+            all_true_ais_head.append(batch_ais_head.cpu().numpy())
+            all_true_ais_chest.append(batch_ais_chest.cpu().numpy())
+            all_true_ais_neck.append(batch_ais_neck.cpu().numpy())
+            all_true_mais.append(batch_y_MAIS.cpu().numpy())
 
-    # 计算平均损失
-    #avg_loss = np.mean(loss_batch)
-
-    # 拼接所有 batch 的结果
-    HIC_preds = np.concatenate(all_HIC_preds)
-    HIC_trues = np.concatenate(all_HIC_trues)
-    AIS_trues = np.concatenate(all_AIS_trues)
-
-    # 检查 HIC_preds 和 HIC_trues 是否包含 inf 或异常值
-    if np.isinf(HIC_preds).any() or np.isinf(HIC_trues).any():
-        print("**Warning: HIC_preds or HIC_trues contains inf values. Replacing inf with large finite values.**")
-        HIC_preds = np.nan_to_num(HIC_preds, nan=0.0, posinf=1e4, neginf=-1e4)
-        HIC_trues = np.nan_to_num(HIC_trues, nan=0.0, posinf=1e4, neginf=-1e4)
-
-    # 计算准确率
-    AIS_preds = AIS_cal_head(HIC_preds)
-    accuracy = 100. * (1 - np.count_nonzero(AIS_preds - AIS_trues) / len(AIS_trues))
-
-    # 计算MAE, RMSE
-    HIC_preds[HIC_preds > 2500] = 2500 # 规定上界，过高的HIC值(>2000基本就危重伤)不具有实际意义
-    HIC_trues[HIC_trues > 2500] = 2500  
-    mae = mean_absolute_error(HIC_trues, HIC_preds)
-    rmse = root_mean_squared_error(HIC_trues, HIC_preds)
-
-    #return avg_loss, accuracy, mae, rmse
-    return accuracy, mae, rmse
+    avg_loss = np.mean(loss_batch)
+    preds, trues = np.concatenate(all_preds), np.concatenate(all_trues)
+    pred_hic, pred_dmax, pred_nij = preds[:, 0], preds[:, 1], preds[:, 2]
+    true_hic, true_dmax, true_nij = trues[:, 0], trues[:, 1], trues[:, 2]
+    
+    ais_head_pred, ais_chest_pred, ais_neck_pred = AIS_cal_head(pred_hic), AIS_cal_chest(pred_dmax), AIS_cal_neck(pred_nij)
+    true_ais_head, true_ais_chest, true_ais_neck = np.concatenate(all_true_ais_head), np.concatenate(all_true_ais_chest), np.concatenate(all_true_ais_neck)
+    true_mais = np.concatenate(all_true_mais)
+    mais_pred = np.maximum.reduce([ais_head_pred, ais_chest_pred, ais_neck_pred])
+    
+    metrics = {
+        'loss': avg_loss,
+        'accu_mais': accuracy_score(true_mais, mais_pred) * 100,
+        'mae_hic': mean_absolute_error(true_hic, pred_hic),
+        'mae_dmax': mean_absolute_error(true_dmax, pred_dmax),
+        'mae_nij': mean_absolute_error(true_nij, pred_nij),
+    }
+    return metrics
 
 
-# 定义目标函数
 def objective(trial):
-    # 超参数搜索空间
-    learning_rate = trial.suggest_float("learning_rate", 0.008, 0.015, step=0.001)  # 学习率
-    #batch_size = trial.suggest_categorical("batch_size", [64, 128, 256, 512])       # 批量大小
-    batch_size = 512
-    weight_decay = trial.suggest_float("weight_decay", 2e-4, 8e-4, step=1e-4)   # 权重衰减
-
-    Ksize_init = trial.suggest_int("Ksize_init", 4, 12, step=2)  # TCN 初始卷积核大小，必须是偶数
-    Ksize_mid = trial.suggest_int("Ksize_mid", 3, 5, step=2)    # TCN 中间卷积核大小，必须是奇数
-    num_blocks_of_tcn = trial.suggest_int("num_blocks_of_tcn", 2, 6, step=1)           # TCN 块数
-    num_layers_of_mlpE = trial.suggest_int("num_layers_of_mlpE", 4, 5, step=1)         # MLP 编码器层数
-    num_layers_of_mlpD = trial.suggest_int("num_layers_of_mlpD", 4, 5, step=1)         # MLP 解码器层数
-    mlpE_hidden = trial.suggest_int("mlpE_hidden", 96, 256, step=32) # MLP 编码器隐藏层维度
-    mlpD_hidden = trial.suggest_int("mlpD_hidden", 128, 256, step=128) # MLP 解码器隐藏层维度
-    encoder_output_dim = trial.suggest_int("encoder_output_dim", 64, 96, step=32)  # 编码器输出维度
-    decoder_output_dim = trial.suggest_int("decoder_output_dim", 16, 64, step=16)    # 解码器输出维度
-    dropout = trial.suggest_float("dropout", 0.05, 0.25, step=0.05)                         # Dropout 概率
-    #base_loss = trial.suggest_categorical("base_loss", ["mse", "mae"])         # 基础损失函数
+    """定义Optuna的优化目标函数"""
+    # --- 超参数搜索空间 ---
+    # 优化与训练相关
+    learning_rate = trial.suggest_float("learning_rate", 0.008, 0.03, log=True)
+    weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-3, log=True)
+    
+    # 损失函数相关
+    weight_factor_classify = trial.suggest_float("weight_factor_classify", 1.2, 4.0)
+    weight_factor_sample = trial.suggest_float("weight_factor_sample", 0.2, 1.0)
+    
+    # 模型结构相关
+    Ksize_init = trial.suggest_int("Ksize_init", 4, 12, step=2)
+    Ksize_mid = trial.suggest_categorical("Ksize_mid", [3, 5])
+    num_blocks_of_tcn = trial.suggest_int("num_blocks_of_tcn", 2, 5)
+    num_layers_of_mlpE = trial.suggest_int("num_layers_of_mlpE", 3, 5)
+    num_layers_of_mlpD = trial.suggest_int("num_layers_of_mlpD", 3, 5)
+    mlpE_hidden = trial.suggest_int("mlpE_hidden", 96, 256, step=32)
+    mlpD_hidden = trial.suggest_int("mlpD_hidden", 96, 256, step=32)
+    encoder_output_dim = trial.suggest_categorical("encoder_output_dim", [64, 96, 128])
+    decoder_output_dim = trial.suggest_categorical("decoder_output_dim", [16, 32, 64])
+    dropout = trial.suggest_float("dropout", 0.05, 0.3)
+    
+    # 固定参数
+    Epochs = 150 # Optuna中通常使用较少的Epochs进行快速评估
+    Batch_size = 512
     base_loss = "mae"
-    weight_factor_classify = trial.suggest_float("weight_factor_classify", 1.4, 1.85, step=0.05)
-    weight_factor_sample =trial.suggest_float("weight_factor_sample", 0.3, 0.8, step=0.1)
-    Epochs = 500
-    eta_min = 5e-6
-
-    # 加载数据集对象
+    loss_weights = (1.0, 1.0, 1.0)
+    eta_min = 1e-6
+    
+    # 加载数据集
     dataset = CrashDataset()
-    # 从data文件夹直接加载数据集
     train_dataset = torch.load("./data/train_dataset.pt")
     val_dataset = torch.load("./data/val_dataset.pt")
+    train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=Batch_size, shuffle=False, num_workers=0)
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-
-    # 设备设置
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # 构建模型
     model = models.TeacherModel(
-        Ksize_init=Ksize_init,
-        Ksize_mid=Ksize_mid,
-        num_classes_of_discrete=dataset.num_classes_of_discrete,
-        num_blocks_of_tcn=num_blocks_of_tcn,
-        num_layers_of_mlpE=num_layers_of_mlpE,
-        num_layers_of_mlpD=num_layers_of_mlpD,
-        mlpE_hidden=mlpE_hidden,
-        mlpD_hidden=mlpD_hidden,
-        encoder_output_dim=encoder_output_dim,
-        decoder_output_dim=decoder_output_dim,
-        dropout=dropout
+        Ksize_init=Ksize_init, Ksize_mid=Ksize_mid, num_classes_of_discrete=dataset.num_classes_of_discrete,
+        num_blocks_of_tcn=num_blocks_of_tcn, num_layers_of_mlpE=num_layers_of_mlpE,
+        num_layers_of_mlpD=num_layers_of_mlpD, mlpE_hidden=mlpE_hidden, mlpD_hidden=mlpD_hidden,
+        encoder_output_dim=encoder_output_dim, decoder_output_dim=decoder_output_dim, dropout=dropout
     ).to(device)
 
     # 定义优化器和损失函数
+    criterion = weighted_loss(base_loss, weight_factor_classify, weight_factor_sample, loss_weights)
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-    criterion = weighted_loss(base_loss=base_loss, weight_factor_classify=weight_factor_classify, weight_factor_sample=weight_factor_sample).to(device)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=Epochs, eta_min=eta_min)
 
-    val_maes = []
-    val_accuracies = []
-    val_rmses = []
-    # 训练模型
-    for epoch in range(Epochs//10*3):
-
-        train(model, train_loader, optimizer, criterion, device)
-        
-        val_accuracy, val_mae, val_rmse = valid(model, val_loader, criterion, device)
-
-        # prune_score = (val_mae * val_rmse) ** 0.5 
-        # trial.report(prune_score , epoch) 
-        # if trial.should_prune():  # 检查是否应该剪枝
-        #     raise optuna.TrialPruned()  # 剪枝当前 trial
-
-        # 记录验证集 MAE
-        if epoch > Epochs//10*3 - 10:
-            val_accuracies.append(val_accuracy)
-            val_maes.append(val_mae)
-            val_rmses.append(val_rmse)
-
-        # 更新学习率
+    val_metrics_list = []
+    # 训练与验证循环
+    for epoch in range(Epochs):
+        run_one_epoch(model, train_loader, criterion, device, optimizer=optimizer)
+        val_metrics = run_one_epoch(model, val_loader, criterion, device, optimizer=None)
         scheduler.step()
 
-    return np.mean(val_accuracies), np.mean(val_maes), np.mean(val_rmses)
+        # Optuna剪枝逻辑 (可选)
+        trial.report(val_metrics['loss'], epoch)
+        if trial.should_prune():
+            raise optuna.TrialPruned()
 
-# 定义保存和加载的文件路径
-study_file = "./runs/optuna_study_teacher3.pkl"
-study_name = "teacher_model_optimization3"
-db_path = "sqlite:///./runs/optuna_study.db"
+        # 记录最后10轮的验证指标
+        if epoch >= Epochs - 10:
+            val_metrics_list.append(val_metrics)
 
-# 定义 SQLite 数据库路径
-storage = RDBStorage(db_path)
+    # --- 返回多目标优化的平均值 ---
+    avg_mais_accu = np.mean([m['accu_mais'] for m in val_metrics_list])
+    avg_mae_hic = np.mean([m['mae_hic'] for m in val_metrics_list])
+    avg_mae_dmax = np.mean([m['mae_dmax'] for m in val_metrics_list])
+    avg_mae_nij = np.mean([m['mae_nij'] for m in val_metrics_list])
 
-# 创建中位数剪枝器
-# pruner = optuna.pruners.MedianPruner(
-#     n_startup_trials=20,  # 前几次试验不剪枝
-#     n_warmup_steps=50,     # 每个试验的前几步不剪枝
-#     interval_steps=5,     # 每隔几步评估一次剪枝条件
-#     n_min_trials=20        # 计算中位数所需的最小历史试验数量
-# )
+    return avg_mais_accu, avg_mae_hic, avg_mae_dmax, avg_mae_nij
 
-# 检查是否存在已有的研究
-try:
-    study = optuna.load_study(study_name=study_name, storage=storage)
-except Exception as e:
-    print(f"Failed to load study: {str(e)}")
-    print("Creating new study...")
-    study = optuna.create_study(sampler=optuna.samplers.NSGAIISampler(), study_name=study_name, storage=storage, directions=["maximize", "minimize", "minimize"]) # 多目标优化使用NSGAIISampler
+if __name__ == "__main__":
+    study_file = "./runs/optuna_study_teacher_multiobj.pkl"
+    study_name = "teacher_model_multiobj_optimization"
+    db_path = "sqlite:///./runs/optuna_study.db"
+    storage = RDBStorage(db_path)
 
-# 设定寻优优先的超参组合
-# with open("./runs/TeacherModel_Train_01102155/TrainingRecord.json", "r") as f:
-#     data = json.load(f)
-# known_params = {
-#     "learning_rate": data["hyperparameters related to training"]["Learning_rate"],
-#     "batch_size": data["hyperparameters related to training"]["Batch_size"],
-#     "weight_decay": data["hyperparameters related to training"]["weight_decay"],
-#     "base_loss": data["hyperparameters related to training"]["base_loss"],
-#     "weight_factor_classify": data["hyperparameters related to training"]["weight_factor_classify"],
-#     "weight_factor_sample": data["hyperparameters related to training"]["weight_factor_sample"],
+    try:
+        study = optuna.load_study(study_name=study_name, storage=storage)
+        print(f"Successfully loaded study '{study_name}' from the database.")
+    except Exception as e:
+        print(f"Failed to load study: {e}")
+        print("Creating new multi-objective study...")
+        # --- 修改: 配置多目标优化 ---
+        study = optuna.create_study(
+            sampler=optuna.samplers.NSGAIISampler(), # 推荐用于多目标优化的采样器
+            study_name=study_name, 
+            storage=storage, 
+            directions=["maximize", "minimize", "minimize", "minimize"] # 对应MAIS Acc, HIC MAE, Dmax MAE, Nij MAE
+        )
 
-#     "Ksize_init": data["hyperparameters related to model"]["Ksize_init"],
-#     "Ksize_mid": data["hyperparameters related to model"]["Ksize_mid"],
-#     "num_blocks_of_tcn": data["hyperparameters related to model"]["num_blocks_of_tcn"],
-#     "num_layers_of_mlpE": data["hyperparameters related to model"]["num_layers_of_mlpE"],
-#     "num_layers_of_mlpD": data["hyperparameters related to model"]["num_layers_of_mlpD"],
-#     "mlpE_hidden": data["hyperparameters related to model"]["mlpE_hidden"],
-#     "mlpD_hidden": data["hyperparameters related to model"]["mlpD_hidden"],
-#     "encoder_output_dim": data["hyperparameters related to model"]["encoder_output_dim"],
-#     "decoder_output_dim": data["hyperparameters related to model"]["decoder_output_dim"],
-#     "dropout": data["hyperparameters related to model"]["dropout"]
-# }
+    # 定义回调函数，定期保存研究结果
+    def save_study_callback(study, trial):
+        if trial.number % 5 == 0:  
+            joblib.dump(study, study_file)
+            print(f"\nStudy saved to {study_file} at trial {trial.number}\n")
 
-# user_attrs = {
-#     "experiment_name": "initial_tuning",
-#     "note": "This is a manually tuned trial."
-# }
-# study.enqueue_trial(known_params, user_attrs=user_attrs)
-# known_params["weight_factor_classify"] = 1.2
-# known_params["weight_factor_sample"] = 1.0
-# study.enqueue_trial(known_params)
+    # 运行优化
+    try:
+        study.optimize(objective, n_trials=100, callbacks=[save_study_callback])
+    except KeyboardInterrupt:
+        print("Optimization interrupted by user.")
+    finally:
+        joblib.dump(study, study_file)
+        print(f"Final study state saved to {study_file}")
 
-# 定义回调函数，定期保存研究结果
-def save_study_callback(study, trial, freq=5):
-    if trial.number % freq == 0:  
-        pareto_front = study.best_trials
-        joblib.dump(pareto_front, study_file)
-        print('=' * 10)
-        print(f"Study saved at trial {trial.number}")
-        print('=' * 10)
-
-# 运行优化
-try:
-    study.optimize(objective, n_trials=100, callbacks=[save_study_callback])
-except KeyboardInterrupt:
-    print("Optimization interrupted by user.")
-    joblib.dump(study, study_file)
-except Exception as e:
-    print(f"Optimization interrupted due to error: {str(e)}")
-    joblib.dump(study, study_file)
-
-# 输出 Pareto 前沿
-print("=" * 50)
-print("Pareto Front:")
-for trial in study.best_trials:
-    print(f"Accuracy: {trial.values[0]:.2f}%, MAE: {trial.values[1]:.2f}, RMSE: {trial.values[2]:.2f}")
-    print(f"Hyperparameters: {trial.params}")
-    print("-" * 50)
-print("=" * 50)
+    # --- 修改: 打印Pareto前沿的结果 ---
+    print("\n" + "="*50)
+    print("                 Pareto Front Results")
+    print("="*50)
+    for trial in study.best_trials:
+        print(f"Trial Number: {trial.number}")
+        print(f"  - MAIS Acc: {trial.values[0]:.2f}%")
+        print(f"  - HIC MAE:  {trial.values[1]:.2f}")
+        print(f"  - Dmax MAE: {trial.values[2]:.2f}")
+        print(f"  - Nij MAE:  {trial.values[3]:.2f}")
+        print(f"  - Hyperparameters: {json.dumps(trial.params, indent=4)}")
+        print("-" * 50)

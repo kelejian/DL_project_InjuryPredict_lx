@@ -5,7 +5,8 @@ import time
 import numpy as np
 from torch.utils.data import DataLoader, ConcatDataset
 from utils import models
-from utils.dataset_prepare import CrashDataset, SigmoidTransform
+# --- 修改: 移除不再使用的 SigmoidTransform ---
+from utils.dataset_prepare import CrashDataset
 
 from utils.set_random_seed import set_random_seed
 set_random_seed()
@@ -24,16 +25,17 @@ def test_inference_time(model, loader):
     num_runs = 200  # 推理次数
 
     with torch.no_grad():
-        for _ in range(num_runs):
-            for batch_x_acc, batch_x_att_continuous, batch_x_att_discrete, batch_y_HIC, batch_y_AIS in loader:
-                # 将数据移动到设备
-                batch_x_acc = batch_x_acc.to(device)
-                batch_x_att_continuous = batch_x_att_continuous.to(device)
-                batch_x_att_discrete = batch_x_att_discrete.to(device)
-                batch_y_HIC = batch_y_HIC.to(device)
+        # --- 修改: 确保循环次数正确 ---
+        for i in range(num_runs):
+            # --- 修改: 更新数据解包以适应新的Dataset格式 ---
+            for batch in loader:
+                # 只取模型输入需要的部分，并移动到设备
+                batch_x_acc = batch[0].to(device)
+                batch_x_att_continuous = batch[1].to(device)
+                batch_x_att_discrete = batch[2].to(device)
 
-                # 预热
-                if _ == 0:
+                # 预热阶段 (仅在第一次迭代时执行)
+                if i == 0:
                     for _ in range(50):
                         if isinstance(model, models.TeacherModel):
                             model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
@@ -41,6 +43,7 @@ def test_inference_time(model, loader):
                             model(batch_x_att_continuous, batch_x_att_discrete)
 
                 # 开始计时
+                torch.cuda.synchronize() # 确保CUDA操作同步
                 start_time = time.time()
 
                 # 前向传播
@@ -50,86 +53,59 @@ def test_inference_time(model, loader):
                     model(batch_x_att_continuous, batch_x_att_discrete)
 
                 # 结束计时
+                torch.cuda.synchronize() # 确保CUDA操作同步
                 elapsed_time = time.time() - start_time
                 total_time += elapsed_time
 
     # 计算平均推理时间
-    avg_time = total_time / num_runs
-    print(f"Average inference time: {avg_time:.4f} seconds")
+    avg_time = total_time / (num_runs * len(loader)) # 平均到每个批次
+    print(f"Average inference time per batch: {avg_time:.6f} seconds")
 
 if __name__ == "__main__":
-    # 解析命令行参数
     import argparse
     parser = argparse.ArgumentParser(description="Test Teacher or Student Model Inference Time")
-    parser.add_argument("--run_dir", '-r', type=str, default=".\\runs\\StudentModel_Distill_01122148")
-    parser.add_argument("--weight_file", '-w', type=str, default="student_best_mae.pth")
+    parser.add_argument("--run_dir", '-r', type=str, required=True, help="Directory of the training run.")
+    parser.add_argument("--weight_file", '-w', type=str, default="teacher_best_mais_accu.pth", help="Name of the model weight file.")
     args = parser.parse_args()
 
     # 加载超参数和训练记录
     with open(os.path.join(args.run_dir, "TrainingRecord.json"), "r") as f:
         training_record = json.load(f)
 
-    # 提取模型相关的超参数
-    model_params = training_record["hyperparameters related to model"]
-    num_layers_of_mlpE = model_params["num_layers_of_mlpE"]
-    num_layers_of_mlpD = model_params["num_layers_of_mlpD"]
-    mlpE_hidden = model_params["mlpE_hidden"]
-    mlpD_hidden = model_params["mlpD_hidden"]
-    encoder_output_dim = model_params["encoder_output_dim"]
-    decoder_output_dim = model_params["decoder_output_dim"]
-    dropout = model_params["dropout"]
-
-    # 提取训练相关的超参数
-    train_params = training_record["hyperparameters related to training"]
-
+    # --- 修改: 从新的JSON结构中提取模型超参数 ---
+    model_params = training_record["hyperparameters"]["model"]
+    
     # 加载数据集
     dataset = CrashDataset()
-
     test_dataset1 = torch.load("./data/val_dataset.pt")
     test_dataset2 = torch.load("./data/test_dataset.pt")
-        
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
 
-    # 设备设置
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # 判断是教师模型还是学生模型
+    # --- 修改: 根据模型类型加载模型 ---
     if "teacher" in args.weight_file.lower():
-        Ksize_init = model_params["Ksize_init"]
-        Ksize_mid = model_params["Ksize_mid"]
-        num_blocks_of_tcn = model_params.get("num_blocks_of_tcn", None)  # 仅教师模型需要
-        # 加载教师模型
         model = models.TeacherModel(
-            Ksize_init=Ksize_init,
-            Ksize_mid=Ksize_mid,
             num_classes_of_discrete=dataset.num_classes_of_discrete,
-            num_blocks_of_tcn=num_blocks_of_tcn,
-            num_layers_of_mlpE=num_layers_of_mlpE,
-            num_layers_of_mlpD=num_layers_of_mlpD,
-            mlpE_hidden=mlpE_hidden,
-            mlpD_hidden=mlpD_hidden,
-            encoder_output_dim=encoder_output_dim,
-            decoder_output_dim=decoder_output_dim,
-            dropout=dropout
+            **model_params
         ).to(device)
-        
     elif "student" in args.weight_file.lower():
-        # 加载学生模型
+        # 如果是学生模型蒸馏而来, 部分参数可能需要从教师模型记录中获取
+        if "distill" in args.run_dir.lower():
+             teacher_run_dir = training_record["hyperparameters"]["teacher_model"]["run_dir"]
+             with open(os.path.join(teacher_run_dir, "TrainingRecord.json"), "r") as f_teacher:
+                 teacher_model_params = json.load(f_teacher)["hyperparameters"]["model"]
+             # 学生模型与教师模型共享编码器和解码器的输出维度
+             model_params["encoder_output_dim"] = teacher_model_params["encoder_output_dim"]
+             model_params["decoder_output_dim"] = teacher_model_params["decoder_output_dim"]
+
         model = models.StudentModel(
             num_classes_of_discrete=dataset.num_classes_of_discrete,
-            num_layers_of_mlpE=num_layers_of_mlpE,
-            num_layers_of_mlpD=num_layers_of_mlpD,
-            mlpE_hidden=mlpE_hidden,
-            mlpD_hidden=mlpD_hidden,
-            encoder_output_dim=encoder_output_dim,
-            decoder_output_dim=decoder_output_dim,
-            dropout=dropout
+            **model_params
         ).to(device)
     else:
         raise ValueError("Weight file name must contain 'teacher' or 'student' to identify the model type.")
     
     model.load_state_dict(torch.load(os.path.join(args.run_dir, args.weight_file)))
 
-    # 测试推理时间
+    print(f"Start testing inference time for model: {args.weight_file}")
     test_inference_time(model, test_loader)
