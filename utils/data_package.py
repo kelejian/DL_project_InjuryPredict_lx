@@ -248,27 +248,27 @@ if __name__ == '__main__':
     ############################################################################################
 
 
-    # print(f"筛选出的case数量: {len(case_ids_need)}")
+    print(f"筛选出的case数量: {len(case_ids_need)}")
 
-    # print("\n打包输入数据...")
-    # package_input_data(
-    #     pulse_dir=pulse_dir,
-    #     params_path=params_path,
-    #     case_id_list=case_ids_need,
-    #     output_path=os.path.join(output_dir, 'data_input.npz')
-    # )
+    print("\n打包输入数据...")
+    package_input_data(
+        pulse_dir=pulse_dir,
+        params_path=params_path,
+        case_id_list=case_ids_need,
+        output_path=os.path.join(output_dir, 'data_input.npz')
+    )
 
-    # print("\n打包标签数据...")
-    # labels_output_path = os.path.join(output_dir, 'data_labels.npz')
-    # np.savez(
-    #     labels_output_path,
-    #     case_ids=case_ids_need,
-    #     HIC=hic15_labels,
-    #     Dmax=dmax_labels,
-    #     Nij=nij_labels,
-    #     AIS_head=ais_head_labels,
-    #     AIS_chest=ais_chest_labels,
-    #     AIS_neck=ais_neck_labels,
-    #     MAIS=mais_labels
-    # )
-    # print(f"对应的标签已保存至: {labels_output_path}")
+    print("\n打包标签数据...")
+    labels_output_path = os.path.join(output_dir, 'data_labels.npz')
+    np.savez(
+        labels_output_path,
+        case_ids=case_ids_need,
+        HIC=hic15_labels,
+        Dmax=dmax_labels,
+        Nij=nij_labels,
+        AIS_head=ais_head_labels,
+        AIS_chest=ais_chest_labels,
+        AIS_neck=ais_neck_labels,
+        MAIS=mais_labels
+    )
+    print(f"对应的标签已保存至: {labels_output_path}")
