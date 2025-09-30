@@ -7,6 +7,11 @@ def AIS_3_cal_head(
     threshold: float = 0.15
 ) -> np.ndarray:
     
+    # 如果输入是单个浮点数, 则记录, 以便返回值与输入类型一致
+    if np.issubdtype(type(HIC15), np.number):
+        is_single_value = True
+    else:
+        is_single_value = False
     HIC15 = np.clip(HIC15, 1, 2500)
     coefficients = np.array([
         [1.54, 0.00650],  # P(AIS≥1)
@@ -17,6 +22,8 @@ def AIS_3_cal_head(
     HIC_inv = 200 / HIC15
     hic_prob = 1.0 / (1.0 + np.exp(c1 + HIC_inv - c2 * HIC15))
     AIS_3 = np.max(np.where(hic_prob.T >= threshold, np.array([1, 3]), 0), axis=1)
+    if is_single_value:
+        return AIS_3[0]
     return AIS_3
 
 def AIS_cal_head(
@@ -33,6 +40,11 @@ def AIS_cal_head(
     Returns:
         np.ndarray: 计算出的 AIS 等级数组。
     """
+    # 如果输入是单个浮点数, 则记录, 以便返回值与输入类型一致
+    if np.issubdtype(type(HIC15), np.number):
+        is_single_value = True
+    else:
+        is_single_value = False 
     HIC15 = np.atleast_1d(HIC15)
     # 限制 HIC15 范围，防止数值不稳定
     HIC15 = np.clip(HIC15, 1, 2500)
@@ -57,6 +69,8 @@ def AIS_cal_head(
     # 确定 AIS 等级: 超过阈值的等级中的最高等级
     AIS = np.max(np.where(hic_prob.T >= threshold, np.arange(1, 6), 0), axis=1)
 
+    if is_single_value:
+        return AIS[0]
     return AIS
 
 def AIS_cal_chest(
@@ -73,12 +87,15 @@ def AIS_cal_chest(
     Returns:
         np.ndarray: 计算出的 AIS 等级数组。
     """
+    if np.issubdtype(type(Dmax), np.number):
+        is_single_value = True
+    else:
+        is_single_value = False
     # Clip Dmax range to prevent numerical instability
     Dmax = np.atleast_1d(Dmax)
     Dmax = np.clip(Dmax, 0.0, 500.0)
 
     # Define coefficients [c1, c2] for P(AIS>=n) = 1 / (1 + exp(c1 - c2 * Dmax))
-    # Based on document rev_criteria2.pdf, page 73, eq. 4.4
     coefficients = np.array([
         [1.8706, 0.04439],  # P(AIS≥2)
         [3.7124, 0.04750],  # P(AIS≥3)
@@ -94,12 +111,11 @@ def AIS_cal_chest(
     Dmax_prob = 1.0 / (1.0 + np.exp(c1 - c2 * Dmax))
 
     # Determine AIS level based on threshold. If no threshold is passed (raw_ais=0), AIS is 0.
-    # AIS level based on Dmax : (2, 3, 4, 5)
-    # raw_ais = np.sum(Dmax_prob.T >= threshold, axis=1)
-    # AIS = np.where(raw_ais > 0, raw_ais + 1, 0)
     AIS = np.max(np.where(Dmax_prob.T >= threshold, np.arange(2, 6), 0), axis=1)
 
-    return AIS 
+    if is_single_value:
+        return AIS[0]
+    return AIS
 
 def AIS_cal_neck(
     Nij: Union[float, np.ndarray], 
@@ -115,12 +131,15 @@ def AIS_cal_neck(
     Returns:
         np.ndarray: 计算出的 AIS 等级数组。
     """
+    if np.issubdtype(type(Nij), np.number):
+        is_single_value = True
+    else:
+        is_single_value = False
     # Clip Nij range to prevent numerical instability
     Nij = np.atleast_1d(Nij)
     Nij = np.clip(Nij, 0, 50.0)
 
     # Define coefficients [c1, c2] for P(AIS>=n) = 1 / (1 + exp(c1 - c2 * Nij))
-    # Based on document rev_criteria2.pdf, page 46, eq. 3.2
     coefficients = np.array([
         [2.054, 1.195],  # P(AIS≥2)
         [3.227, 1.969],  # P(AIS≥3)
@@ -137,8 +156,9 @@ def AIS_cal_neck(
 
     # Determine AIS level based on threshold. If no threshold is passed (raw_ais=0), AIS is 0.
     # AIS level based on Nij : (2, 3, 4, 5)
-    # raw_ais = np.sum(nij_prob.T >= threshold, axis=1)
-    # AIS = np.where(raw_ais > 0, raw_ais + 1, 0)
+
     AIS = np.max(np.where(nij_prob.T >= threshold, np.arange(2, 6), 0), axis=1)
 
+    if is_single_value:
+        return AIS[0]
     return AIS
