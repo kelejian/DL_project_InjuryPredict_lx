@@ -120,18 +120,18 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 优化与训练相关
-    Epochs = 800
+    Epochs = 1000
     Batch_size = 512
-    Learning_rate = 0.024
-    Learning_rate_min = 6e-7
-    weight_decay = 6e-4
-    Patience = 1000 # 早停轮数
-    
+    Learning_rate = 0.022
+    Learning_rate_min = 5e-7
+    weight_decay = 5e-4
+    Patience = 1000
+
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 2.0
-    weight_factor_sample = 0.6
-    loss_weights = (1.0, 1.0, 1.0) # HIC, Dmax, Nij 各自损失的权重
+    weight_factor_classify = 1.2
+    weight_factor_sample = 0.5
+    loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     num_layers_of_mlpE = 4
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     mlpD_hidden = 128
     encoder_output_dim = 96
     decoder_output_dim = 32
-    dropout = 0.15
+    dropout = 0.20
     ############################################################################################
     ############################################################################################
 

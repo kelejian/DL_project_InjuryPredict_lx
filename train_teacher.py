@@ -128,23 +128,24 @@ if __name__ == "__main__":
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.5
+    weight_factor_classify = 1.1
     weight_factor_sample = 0.5
-    loss_weights = (1.0, 1.0, 1.0) # HIC, Dmax, Nij 各自损失的权重
+    loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     Ksize_init = 8
     Ksize_mid = 3
     num_blocks_of_tcn = 3
+    tcn_channels_list = [64, 128, 128]  # 每个 TCN 块的输出通道数
     num_layers_of_mlpE = 4
     num_layers_of_mlpD = 4
     mlpE_hidden = 160
     mlpD_hidden = 128
     encoder_output_dim = 96
     decoder_output_dim = 32
-    dropout = 0.20
+    dropout = 0.4
     use_channel_attention = True  # 是否使用通道注意力机制
-    fixed_channel_weight = [0.6, 0.35, 0.05]  # 固定的通道注意力权重(None表示自适应学习)
+    fixed_channel_weight = [0.6, 0.4, 0]  # 固定的通道注意力权重(None表示自适应学习)
     ############################################################################################
     ############################################################################################
 
@@ -165,6 +166,7 @@ if __name__ == "__main__":
         Ksize_mid=Ksize_mid,
         num_classes_of_discrete=dataset.num_classes_of_discrete,
         num_blocks_of_tcn=num_blocks_of_tcn,
+        tcn_channels_list=tcn_channels_list,
         num_layers_of_mlpE=num_layers_of_mlpE,
         num_layers_of_mlpD=num_layers_of_mlpD,
         mlpE_hidden=mlpE_hidden,
@@ -392,6 +394,7 @@ if __name__ == "__main__":
             },
             "model": {
                 "Ksize_init": Ksize_init, "Ksize_mid": Ksize_mid, "num_blocks_of_tcn": num_blocks_of_tcn,
+                "tcn_channels_list": tcn_channels_list,
                 "num_layers_of_mlpE": num_layers_of_mlpE, "num_layers_of_mlpD": num_layers_of_mlpD,
                 "mlpE_hidden": mlpE_hidden, "mlpD_hidden": mlpD_hidden,
                 "encoder_output_dim": encoder_output_dim, "decoder_output_dim": decoder_output_dim,

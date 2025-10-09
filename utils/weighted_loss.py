@@ -81,9 +81,9 @@ class weighted_loss(nn.Module):
         self.loss_weights = loss_weights
         
         # --- 为每个损伤部位定义分段加权超参数 ---
-        self.params_head = {'a': 60, 'b': 1600, 'c': 1800, 'd': 2000, 't': -0.5}
-        self.params_chest = {'a': 5.0, 'b': 175, 'c': 195, 'd': 220, 't': -0.5}
-        self.params_neck = {'a': 0.3, 'b': 2.0, 'c': 2.3, 'd': 2.75, 't': -0.5}
+        self.params_head = {'a': 50, 'b': 1700, 'c': 1850, 'd': 2000, 't': -0.5}
+        self.params_chest = {'a': 4.0, 'b': 180, 'c': 190, 'd': 210, 't': -0.5}
+        self.params_neck = {'a': 0.2, 'b': 2.1, 'c': 2.4, 'd': 2.7, 't': -0.5}
  
     def weighted_function(self, pred, true, injury_type):
         """

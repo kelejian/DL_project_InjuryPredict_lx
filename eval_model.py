@@ -247,7 +247,7 @@ if __name__ == "__main__":
 ## Model Identification
 - **Run Directory**: `{args.run_dir}`
 - **Weight File**: `{args.weight_file}`
-- **Model Type**: {"Teacher" if "teacher" in args.weight_file.lower() else "Student"}
+- **Model Type**: {"Teacher" if "teacher" in args.run_dir.lower() else "Student"}
 - **Testset size**: {len(test_dataset)}
 ```
 

@@ -1,18 +1,16 @@
 ''' This module includes data precessing dataset creating. '''
 import warnings
 warnings.filterwarnings("ignore")
-import os
 import torch
-from torch import nn
 from torch.utils.data import Dataset, DataLoader, random_split
 from sklearn.preprocessing import LabelEncoder
 import random
 import numpy as np
 
 try:
-    from utils.set_random_seed import set_random_seed  # 作为包导入时使用
+    from utils.set_random_seed import GLOBAL_SEED, set_random_seed  # 作为包导入时使用
 except ImportError:
-    from set_random_seed import set_random_seed   # 直接运行时使用
+    from set_random_seed import GLOBAL_SEED, set_random_seed   # 直接运行时使用
 
 set_random_seed()
 
@@ -162,40 +160,148 @@ class CrashDataset(Dataset):
         )
 
 if __name__ == '__main__':
+    # 导入所需的库
+    import time
+    import numpy as np
+    import pandas as pd
+    from torch.utils.data import Subset
+    from sklearn.model_selection import train_test_split
 
     # 分割打包数据集并测试
-    import time
     start_time = time.time()
     dataset = CrashDataset()
-    print("Dataset loading time:", time.time() - start_time)
+    print("\nDataset loading time:", time.time() - start_time)
 
-    train_size = int(0.8 * len(dataset))
-    val_size = int(0.19 * len(dataset))
-    test_size = len(dataset) - train_size - val_size
+    # --- Robust Stratified Splitting ---
 
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+    # 1. 定义数据集划分比例
+    # 即使测试集比例很小，也在这里定义，方便未来调整
+    TRAIN_RATIO = 0.8
+    VAL_RATIO = 0.19
+    # TEST_RATIO 将是剩余部分，确保总和为1
+    TEST_RATIO = round(1.0 - TRAIN_RATIO - VAL_RATIO, 2)
+    if TEST_RATIO < 0:
+        raise ValueError("TRAIN_RATIO and VAL_RATIO cannot sum to more than 1.")
 
+
+    # 2. 准备用于分层的标签和索引
+    labels = dataset.mais
+    indices = np.arange(len(dataset))
+
+    # 3. 第一次划分：严格分层地划分出训练集 vs. (验证集 + 测试集)
+    
+    # 找出并分离出样本数少于2的 "孤儿" 类别，直接放入训练集
+    label_counts = pd.Series(labels).value_counts()
+    # 最小分组数至少为2，所以任何少于2个样本的类别都无法分层
+    insufficient_samples_labels = label_counts[label_counts < 2].index.tolist()
+    
+    train_indices_final = []
+    # 剩余待划分的索引
+    remaining_indices = indices
+
+    if insufficient_samples_labels:
+        print(f"\nWarning: Found classes with < 2 samples: {insufficient_samples_labels}")
+        print("These will be moved to the training set to allow stratification.")
+        
+        # 将孤儿样本的索引直接加入最终的训练集
+        singleton_mask = np.isin(labels, insufficient_samples_labels)
+        train_indices_final.extend(indices[singleton_mask])
+        
+        # 从待划分的索引中移除这些孤儿样本
+        remaining_indices = indices[~singleton_mask]
+    
+    remaining_labels = labels[remaining_indices]
+
+    # 对剩余的主体数据进行分层抽样
+    # 计算剩余数据中应该有多少比例作为测试/验证集
+    temp_size = VAL_RATIO + TEST_RATIO
+    
+    # Stratify split the rest of the data
+    train_main_indices, temp_indices, _, _ = train_test_split(
+        remaining_indices, remaining_labels,
+        test_size=temp_size,
+        random_state=GLOBAL_SEED,
+        stratify=remaining_labels
+    )
+    
+    # 将分层抽样出的训练索引与之前的孤儿索引合并
+    train_indices_final.extend(train_main_indices)
+    train_indices = np.array(train_indices_final)
+
+
+    # 4. 第二次划分：对 temp_indices 进行 *非分层* 的随机划分
+    # 这是关键改动：由于 temp_indices 样本量小，不进行分层以避免错误
+    if len(temp_indices) > 0 and TEST_RATIO > 0:
+        # 计算验证集和测试集在 temp_indices 中的相对比例
+        relative_test_ratio = TEST_RATIO / (VAL_RATIO + TEST_RATIO)
+        
+        # 检查是否因为样本太少导致无法划分
+        if len(temp_indices) < 2:
+             # 如果临时集只有一个样本，直接全部分给验证集，测试集为空
+             val_indices = temp_indices
+             test_indices = []
+             print("\nWarning: Not enough samples for a separate test set. Test set will be empty.")
+        else:
+            val_indices, test_indices = train_test_split(
+                temp_indices,
+                test_size=relative_test_ratio,
+                random_state=GLOBAL_SEED
+                # 注意：此处没有 stratify 参数
+            )
+    else:
+        # 如果 temp_indices 为空或 TEST_RATIO 为0
+        val_indices = temp_indices
+        test_indices = []
+
+    # 5. 使用 PyTorch 的 Subset 创建最终的数据集
+    train_dataset = Subset(dataset, train_indices)
+    val_dataset = Subset(dataset, val_indices)
+    test_dataset = Subset(dataset, test_indices)
+
+    # --- Splitting End ---
+
+    print(f"\nDataset split sizes:")
+    print(f"  - Total: {len(dataset)}")
+    print(f"  - Train: {len(train_dataset)}")
+    print(f"  - Validation: {len(val_dataset)}")
+    print(f"  - Test: {len(test_dataset)}")
+
+    # 验证标签分布
+    def get_label_distribution(subset):
+        if len(subset.indices) == 0:
+            return "Empty"
+        labels = [subset.dataset.mais[i] for i in subset.indices]
+        unique, counts = np.unique(labels, return_counts=True)
+        return dict(zip(unique, counts))
+
+    print("\nMAIS label distribution in each subset:")
+    print(f"  - Train: {get_label_distribution(train_dataset)}")
+    print(f"  - Validation: {get_label_distribution(val_dataset)}")
+    print(f"  - Test: {get_label_distribution(test_dataset)}")
+
+    # 保存处理后的数据集
     torch.save(train_dataset, './data/train_dataset.pt')
     torch.save(val_dataset, './data/val_dataset.pt')
     torch.save(test_dataset, './data/test_dataset.pt')
+    print("\nTrain, validation, and test datasets saved successfully.")
 
+
+    # 测试 DataLoader 是否能正常工作
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
 
     dataset.print_encoding_mappings()
     
+    print("\nTesting DataLoader...")
     batch_start_time = time.time()
     for i, batch in enumerate(train_loader):
-
         (x_acc, x_att_continuous, x_att_discrete, 
          y_HIC, y_Dmax, y_Nij, 
          ais_head, ais_chest, ais_neck, mais) = batch
         
         print("x_acc shape:", x_acc.shape)
         print("y_HIC shape:", y_HIC.shape)
-        print("y_Dmax shape:", y_Dmax.shape)
-        print("y_Nij shape:", y_Nij.shape)
         print("MAIS shape:", mais.shape)
         break
-    print("batch time:", time.time() - batch_start_time)
+    print("batch loading time:", time.time() - batch_start_time)

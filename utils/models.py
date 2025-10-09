@@ -115,12 +115,12 @@ class ChannelAttention(nn.Module):
         return None
 
 class TemporalConvNet(nn.Module):
-    def __init__(self, in_channels, num_channels, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128, use_channel_attention=True, fixed_channel_weight=None):
+    def __init__(self, in_channels, tcn_channels_list, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128, use_channel_attention=True, fixed_channel_weight=None):
         """
         教师模型一部分, 负责提取X,Y加速度曲线特征(x_acc), 作为encoder一部分
         Args:
             in_channels (int): 输入通道数。
-            num_channels (list): 每个 TemporalBlock 的输出通道数。
+            tcn_channels_list (list): 每个 TemporalBlock 的输出通道数。
             Ksize_init (int): 初始卷积核大小。默认为 6。
             Ksize_mid (int): 中间卷积核大小。默认为 3。
             dropout (float): 默认为 0.1。
@@ -134,11 +134,11 @@ class TemporalConvNet(nn.Module):
         if use_channel_attention:
             self.channel_attention = ChannelAttention(in_channels, fixed_weight=fixed_channel_weight)
 
-        kernel_sizes = [Ksize_init] + [Ksize_mid] * (len(num_channels)-1)
+        kernel_sizes = [Ksize_init] + [Ksize_mid] * (len(tcn_channels_list)-1)
 
         # 确保参数列表长度一致
-        assert len(num_channels) == len(kernel_sizes), \
-            "参数列表长度必须一致:num_channels, kernel_sizes"
+        assert len(tcn_channels_list) == len(kernel_sizes), \
+            "参数列表长度必须一致:tcn_channels_list, kernel_sizes"
         # 确保kernel_sizes[0]为偶数, 其余为奇数
         assert kernel_sizes[0] % 2 == 0, "kernel_sizes[0]必须为偶数"
         if len(kernel_sizes) > 1:
@@ -147,16 +147,16 @@ class TemporalConvNet(nn.Module):
         # 初始卷积层, 并进行一次下采样
         padding_init = (kernel_sizes[0] - 2) // 2  # 保持输入输出长度一致
         self.initial_conv = nn.Sequential(
-            nn.Conv1d(in_channels, num_channels[0], kernel_size=kernel_sizes[0], stride=2, padding=padding_init),  # 下采样
-            nn.BatchNorm1d(num_channels[0]),
+            nn.Conv1d(in_channels, tcn_channels_list[0], kernel_size=kernel_sizes[0], stride=2, padding=padding_init),  # 下采样
+            nn.BatchNorm1d(tcn_channels_list[0]),
             nn.ReLU(),
         )
 
         # 堆叠 TemporalBlock
         layers = []
-        in_channels = num_channels[0]
-        for i in range(len(num_channels)-1):
-            out_channels = num_channels[i+1]
+        in_channels = tcn_channels_list[0]
+        for i in range(len(tcn_channels_list)-1):
+            out_channels = tcn_channels_list[i+1]
             kernel_size = kernel_sizes[i+1]
             layers.append(
                 TemporalBlock(
@@ -172,7 +172,7 @@ class TemporalConvNet(nn.Module):
 
         # 全局平均池化 + 全连接层
         self.global_avg_pool = nn.AdaptiveAvgPool1d(1)  # 将时间维度降为 1
-        self.fc = nn.Linear(num_channels[-1], hidden)  # 输出特征维度为 hidden
+        self.fc = nn.Linear(tcn_channels_list[-1], hidden)  # 输出特征维度为 hidden
 
     def forward(self, x):
         """
@@ -186,13 +186,13 @@ class TemporalConvNet(nn.Module):
         if self.use_channel_attention:
             x = self.channel_attention(x)  # 对X、Y、Z方向自适应加权
         # 初始卷积层（下采样）
-        x = self.initial_conv(x)  # 输出形状: (B, num_channels[0], L/2)
+        x = self.initial_conv(x)  # 输出形状: (B, tcn_channels_list[0], L/2)
         # TemporalBlock 堆叠
-        x = self.temporal_blocks(x)  # 输出形状: (B, num_channels[-1], L/2)
+        x = self.temporal_blocks(x)  # 输出形状: (B, tcn_channels_list[-1], L/2)
         # 全局平均池化
-        x = self.global_avg_pool(x)  # 输出形状: (B, num_channels[-1], 1)
+        x = self.global_avg_pool(x)  # 输出形状: (B, tcn_channels_list[-1], 1)
         # 全连接层
-        x = x.squeeze(-1)  # 去掉时间维度,形状: (B, num_channels[-1])
+        x = x.squeeze(-1)  # 去掉时间维度,形状: (B, tcn_channels_list[-1])
         x = self.fc(x)  # 输出形状: (B, hidden)
         return x
 
@@ -241,7 +241,9 @@ class DiscreteFeatureEmbedding(nn.Module):
 class TeacherModel(nn.Module):
     def __init__(self, num_classes_of_discrete, 
                  Ksize_init=6, Ksize_mid=3,
-                 num_blocks_of_tcn=4, num_layers_of_mlpE=4, num_layers_of_mlpD=4, 
+                 num_blocks_of_tcn=4,
+                 tcn_channels_list=None, 
+                 num_layers_of_mlpE=4, num_layers_of_mlpD=4, 
                  mlpE_hidden=128, mlpD_hidden=96, 
                  encoder_output_dim=128, decoder_output_dim=16, 
                  dropout=0.1, 
@@ -254,6 +256,7 @@ class TeacherModel(nn.Module):
             Ksize_init (int): TCN 初始卷积核大小。
             Ksize_mid (int): TCN 中间卷积核大小。
             num_blocks_of_tcn (int): TCN 编码器的块数。
+            tcn_channels_list (list or None): TCN 每个块的输出通道数列表。如果为 None,则根据 num_blocks_of_tcn 自动设置。
             num_layers_of_mlpE (int): MLP 编码器的层数。
             num_layers_of_mlpD (int): MLP 解码器的层数。
             mlpE_hidden (int): MLP 编码器的隐藏层维度。
@@ -269,17 +272,21 @@ class TeacherModel(nn.Module):
         self.discrete_embedding = DiscreteFeatureEmbedding(num_classes_of_discrete)
 
         # TCN 编码器，处理 x_acc，现在支持通道注意力
-        if num_blocks_of_tcn < 2:
-            raise ValueError("num_blocks_of_tcn 必须大于等于 2")
-        elif num_blocks_of_tcn >=2 and num_blocks_of_tcn <= 4:
-            num_channels = [64, 128] + [256] * (num_blocks_of_tcn - 2)
-        elif num_blocks_of_tcn >= 5:
-            num_channels = [64, 128] + [256] * (num_blocks_of_tcn - 3) + [512]
-
+        if tcn_channels_list is None:
+            if num_blocks_of_tcn < 2:
+                raise ValueError("num_blocks_of_tcn 必须大于等于 2")
+            elif num_blocks_of_tcn >=2 and num_blocks_of_tcn <= 4:
+                tcn_channels_list = [64, 128] + [256] * (num_blocks_of_tcn - 2)
+            elif num_blocks_of_tcn >= 5:
+                tcn_channels_list = [64, 128] + [256] * (num_blocks_of_tcn - 3) + [512]
+        else:
+            if len(tcn_channels_list) != num_blocks_of_tcn:
+                raise ValueError("tcn_channels_list 长度必须等于 num_blocks_of_tcn")
+            
         #########################################
         self.tcn = TemporalConvNet(
             in_channels=3, # 注意输入通道数!!!!!
-            num_channels=num_channels, 
+            tcn_channels_list=tcn_channels_list, 
             Ksize_init=Ksize_init, 
             Ksize_mid=Ksize_mid, 
             hidden=encoder_output_dim // 2, 

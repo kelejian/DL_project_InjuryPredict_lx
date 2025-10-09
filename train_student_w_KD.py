@@ -149,31 +149,31 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 教师模型路径
-    teacher_run_dir = ".\\runs\\TeacherModel_09292108" # <-- 教师模型运行目录
+    teacher_run_dir = ".\\runs\\TeacherModel_10091402" # <-- 教师模型运行目录
     teacher_model_name = "best_mais_accu.pth"
 
     # 2. 优化与训练相关
-    Epochs = 800
+    Epochs = 1000
     Batch_size = 512
-    Learning_rate = 0.024
-    Learning_rate_min = 6e-7
-    weight_decay = 6e-4
+    Learning_rate = 0.022
+    Learning_rate_min = 5e-7
+    weight_decay = 5e-4
     Patience = 1000
 
     # 3. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 2.0
-    weight_factor_sample = 0.6
-    loss_weights = (1.0, 1.0, 1.0) # HIC, Dmax, Nij 各自损失的权重
-    distill_encoder_weight = 500.0 # 编码器蒸馏损失权重
-    distill_decoder_weight = 20.0  # 解码器蒸馏损失权重
+    weight_factor_classify = 1.2
+    weight_factor_sample = 0.5
+    loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
+    distill_encoder_weight = 0.4 # 编码器蒸馏损失权重
+    distill_decoder_weight = 0.02  # 解码器蒸馏损失权重
 
     # 4. 学生模型结构相关 (encoder/decoder_output_dim 会被教师模型覆盖)
     num_layers_of_mlpE = 4
     num_layers_of_mlpD = 4
     mlpE_hidden = 160
     mlpD_hidden = 128
-    dropout = 0.15
+    dropout = 0.20
     ############################################################################################
     ############################################################################################
 
@@ -350,7 +350,9 @@ if __name__ == "__main__":
                 "base_loss": base_loss, 
                 "weight_factor_classify": weight_factor_classify,
                 "weight_factor_sample": weight_factor_sample,
-                "loss_weights": loss_weights
+                "loss_weights": loss_weights,
+                "distill_encoder_weight": distill_encoder_weight,
+                "distill_decoder_weight": distill_decoder_weight
             },
             "model": {
                 "num_layers_of_mlpE": num_layers_of_mlpE, "num_layers_of_mlpD": num_layers_of_mlpD, 
