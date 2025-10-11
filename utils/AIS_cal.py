@@ -38,7 +38,7 @@ def AIS_cal_head(
         threshold (float): 用于确定伤害等级的经验概率阈值。
 
     Returns:
-        np.ndarray: 计算出的 AIS 等级数组。
+        float or np.ndarray: 计算出的 AIS 等级, 和输入的损伤值形状一致。
     """
     # 如果输入是单个浮点数, 则记录, 以便返回值与输入类型一致
     if np.issubdtype(type(HIC15), np.number):
@@ -85,7 +85,7 @@ def AIS_cal_chest(
         threshold (float): 用于确定伤害等级的经验概率阈值。
 
     Returns:
-        np.ndarray: 计算出的 AIS 等级数组。
+        float or np.ndarray: 计算出的 AIS 等级, 和输入的损伤值形状一致。
     """
     if np.issubdtype(type(Dmax), np.number):
         is_single_value = True
@@ -129,7 +129,7 @@ def AIS_cal_neck(
         threshold (float): 用于确定伤害等级的经验概率阈值。
 
     Returns:
-        np.ndarray: 计算出的 AIS 等级数组。
+        float or np.ndarray: 计算出的 AIS 等级, 和输入的损伤值形状一致。
     """
     if np.issubdtype(type(Nij), np.number):
         is_single_value = True
