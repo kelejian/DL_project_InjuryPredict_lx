@@ -386,7 +386,7 @@ class TeacherModel(nn.Module):
             x_att_discrete (torch.Tensor): 离散特征，形状为 (B, 4)。
 
         返回:
-            hic_pred: 预测的 HIC 值，形状为 (B, 1)。
+            predictions: 预测的 HIC, Dmax, Nij 值，形状为 (B, 3)。
             encoder_output: 编码器的输出，形状为 (B, encoder_output_dim )。
             decoder_output: 解码器的输出，形状为 (B, decoder_output_dim)。
         """
@@ -515,11 +515,11 @@ class StudentModel(nn.Module):
     def forward(self, x_att_continuous, x_att_discrete):
         """
         参数:
-            x_att_continuous (torch.Tensor): 连续特征，形状为 (B, 4)。
+            x_att_continuous (torch.Tensor): 连续特征，形状为 (B, 14)。
             x_att_discrete (torch.Tensor): 离散特征，形状为 (B, 4)。
 
         返回:
-            hic_pred: 预测的 HIC 值，形状为 (B, 1)。
+            predictions: 预测的 HIC, Dmax, Nij 值，形状为 (B, 3)。
             encoder_output: 编码器的输出，形状为 (B, encoder_output_dim)。
             decoder_output: 解码器的输出，形状为 (B, decoder_output_dim)。
         """

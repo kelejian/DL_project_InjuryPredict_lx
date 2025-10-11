@@ -374,27 +374,27 @@ def verify_onnx_model(onnx_path, pytorch_model, sample_inputs, model_type="teach
     
     if model_type == "teacher":
         onnx_inputs = {
-            "x_acc": sample_inputs[0].cpu().numpy(),
-            "x_att_continuous": sample_inputs[1].cpu().numpy(),
-            "x_att_discrete": sample_inputs[2].cpu().numpy()
+            "x_acc": sample_inputs[0].cpu().numpy(), # 形状 (1, 3, 150)
+            "x_att_continuous": sample_inputs[1].cpu().numpy(), # 形状 (1, 14)
+            "x_att_discrete": sample_inputs[2].cpu().numpy() # 形状 (1, 4)
         }
     else: # student
         onnx_inputs = {
-            "x_att_continuous": sample_inputs[1].cpu().numpy(),
-            "x_att_discrete": sample_inputs[2].cpu().numpy()
+            "x_att_continuous": sample_inputs[1].cpu().numpy(), # 形状 (1, 14)
+            "x_att_discrete": sample_inputs[2].cpu().numpy() # 形状 (1, 4)
         }
     
     onnx_outputs = sess.run(None, onnx_inputs)
     
     # --- 打印比较输出 ---
-    print("  打印PyTorch和ONNX的输出(只看三个部位损伤值输出, 忽略编码器解码器特征输出):")
-    output_names = ["预测值(HIC,Dmax,Nij)"]
+    print("  打印PyTorch和ONNX的输出(只看三个部位损伤值输出, 忽略后面的编码器解码器输出的特征值):")
+    output_names = ["预测值(HIC,Dmax,Nij)"] # 只关注第一个输出，即损伤值标签
     np.set_printoptions(suppress=True, precision=6) # 设置numpy打印选项 避免科学计数法
     for i, name in enumerate(output_names):
         pt_out, onnx_out = pt_outputs[i].cpu().numpy(), onnx_outputs[i]
         print(f"  - {name}:")
-        print(f"    PyTorch 输出: {pt_out.flatten()} ")
-        print(f"    ONNX 输出:    {onnx_out.flatten()}")
+        print(f"    PyTorch 输出: {pt_out.flatten()} ") # (1,3) -> (3,)
+        print(f"    ONNX 输出:    {onnx_out.flatten()}") # (1,3) -> (3,)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="导出教师和学生模型为ONNX格式，并进行验证")
@@ -419,6 +419,7 @@ if __name__ == "__main__":
     
     # 2. 创建并预处理一个样本输入
     print("\n创建并预处理样本输入...")
+    # ============================================================================
     raw_inputs = {
         "impact_velocity": 50,
         "impact_angle": 0,
@@ -438,8 +439,9 @@ if __name__ == "__main__":
         "ttf": 70,
         "sp": 50,
         "recline_angle": 5,
-        "waveform": -np.random.randn(3, 150) * 200  # 可选自定义波形
+        "waveform": -np.random.randn(3, 150) * 200  # 形状 (3, 150)
     }
+    # ============================================================================
     raw_params, raw_waveform = create_sample_raw_input(raw_inputs)
     sample_inputs = preprocess_input(raw_params, raw_waveform, processor)
     
