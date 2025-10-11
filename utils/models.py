@@ -246,7 +246,7 @@ class TeacherModel(nn.Module):
                  num_layers_of_mlpE=4, num_layers_of_mlpD=4, 
                  mlpE_hidden=128, mlpD_hidden=96, 
                  encoder_output_dim=128, decoder_output_dim=16, 
-                 dropout=0.1, 
+                 dropout_MLP=0.2, dropout_TCN=0.15, 
                  use_channel_attention=True, fixed_channel_weight=None):
         """
         TeacherModel 的初始化。
@@ -263,7 +263,8 @@ class TeacherModel(nn.Module):
             mlpD_hidden (int): MLP 解码器的隐藏层维度。
             encoder_output_dim  (int): 编码器的输出特征维度。用于蒸馏。
             decoder_output_dim (int): 解码器的输出特征维度。用于蒸馏。
-            dropout (float): MLP模块的Dropout 概率。
+            dropout_MLP (float): MLP模块的Dropout 概率。
+            dropout_TCN (float): TCN模块的Dropout 概率。
             use_channel_attention (bool): 是否使用通道注意力机制。
         """
         super(TeacherModel, self).__init__()
@@ -290,7 +291,7 @@ class TeacherModel(nn.Module):
             Ksize_init=Ksize_init, 
             Ksize_mid=Ksize_mid, 
             hidden=encoder_output_dim // 2, 
-            dropout=dropout,
+            dropout=dropout_TCN,
             use_channel_attention=use_channel_attention,
             fixed_channel_weight=fixed_channel_weight
         ) 
@@ -313,7 +314,7 @@ class TeacherModel(nn.Module):
             act="relu",
             act_first=False, # 先归一化再激活
             plain_last=True, # 最后一层不应用非线性激活、批归一化和 dropout
-            dropout=dropout
+            dropout=dropout_MLP
         )
 
         self.bn1 = nn.BatchNorm1d(encoder_output_dim  + mlp_encoder_input_dim) # 归一化解码器输入特征
@@ -331,7 +332,7 @@ class TeacherModel(nn.Module):
             act="relu",
             act_first=False, # 先归一化再激活
             plain_last=True, # 最后一层不应用非线性激活、批归一化和 dropout
-            dropout=dropout
+            dropout=dropout_MLP
         )
 
         self.bn2 = nn.BatchNorm1d(decoder_output_dim) # 归一化解码器输出特征

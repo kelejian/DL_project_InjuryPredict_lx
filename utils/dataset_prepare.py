@@ -2,10 +2,13 @@
 import warnings
 warnings.filterwarnings("ignore")
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
-from sklearn.preprocessing import LabelEncoder
-import random
+from torch.utils.data import Dataset, Subset, DataLoader
+from sklearn.preprocessing import LabelEncoder, MinMaxScaler, MaxAbsScaler
+from sklearn.model_selection import train_test_split
 import numpy as np
+import pandas as pd
+import joblib
+import time
 
 try:
     from utils.set_random_seed import GLOBAL_SEED, set_random_seed  # 作为包导入时使用
@@ -15,284 +18,278 @@ except ImportError:
 set_random_seed()
 
 class CrashDataset(Dataset):
+    """
+    数据集类，负责加载和存储原始及处理后的碰撞数据。
+    """
     def __init__(self, input_file='./data/data_input.npz', label_file='./data/data_labels.npz'):
         """
         Args:
             input_file (str): 包含碰撞波形和特征数据的 .npz 文件路径。
             label_file (str): 包含标签数据的 .npz 文件路径。
         """
-        self.inputs = np.load(input_file)
-        self.labels = np.load(label_file)
+        with np.load(input_file) as inputs, np.load(label_file) as labels:
+            # --- 对齐校验 ---
+            inp_ids = inputs['case_ids']
+            lab_ids = labels['case_ids']
+            assert np.array_equal(inp_ids, lab_ids), (
+                f"Case ID 不匹配：input_file 中 {inp_ids[:5]}… vs label_file 中 {lab_ids[:5]}…"
+            )
 
-        # --- 新增：对齐校验 ---
-        inp_ids = self.inputs['case_ids']
-        lab_ids = self.labels['case_ids']
-        assert np.array_equal(inp_ids, lab_ids), (
-            f"Case ID 不匹配：input_file 中 {inp_ids[:5]}… vs label_file 中 {lab_ids[:5]}…"
-        )
+            self.case_ids = inp_ids
 
-        # 只有校验通过才继续下面的赋值和预处理
-        self.case_ids = inp_ids # 形状 (N,)
+            # --- 加载原始数据 ---
+            self.x_acc_raw = inputs['waveforms'] # 形状 (N, 3, 150) x/y/z direction acceleration waveforms
+            self.x_att_raw = inputs['params'] # 形状 (N, 18)  attributes
 
-        # 输入特征
-        self.x_acc = self.inputs['waveforms'] # 形状 (N, 3, 150) acceleration waveforms
-        self.x_att = self.inputs['params'] # 形状 (N, 18)  attributes
+            # 特征数据 (x_att_raw) 说明：形状 (N, 18)，18 个特征，包括连续和离散变量
+            # 0: impact_velocity, 1: impact_angle, 2: overlap, 3: occupant_type, 4: ll1, 5: ll2, 6: btf, 
+            # 7: pp, 8: plp, 9: lla_status, 10: llattf, 11: dz, 12: ptf, 13: aft, 14: aav_status, 
+            # 15: ttf, 16: sp (座椅前后位置), 17: recline_angle (座椅靠背角度)
 
-        # --- 加载所有目标变量 ---
-        self.y_HIC = self.labels['HIC']
-        self.y_Dmax = self.labels['Dmax']
-        self.y_Nij = self.labels['Nij']
-        self.ais_head = self.labels['AIS_head']
-        self.ais_chest = self.labels['AIS_chest']
-        self.ais_neck = self.labels['AIS_neck']
-        self.mais = self.labels['MAIS']
-
-        # 初始化 LabelEncoder 和映射关系存储
-        self.label_encoders = {}  # 存储每个离散特征的 LabelEncoder
-        self.encoding_mappings = {}  # 存储每个离散特征的编码映射关系
-
-        # 数据预处理
-        self._preprocess_data()
+            # --- 加载所有目标变量 ---
+            self.y_HIC = labels['HIC']
+            self.y_Dmax = labels['Dmax']
+            self.y_Nij = labels['Nij']
+            self.ais_head = labels['AIS_head']
+            self.ais_chest = labels['AIS_chest']
+            self.ais_neck = labels['AIS_neck']
+            self.mais = labels['MAIS']
         
-        # 存储每个离散特征的类别数
-        self.num_classes_of_discrete = [
-            len(self.label_encoders[idx].classes_) for idx in self.discrete_indices]
+        self.x_acc = None
+        self.x_att_continuous = None
+        self.x_att_discrete = None
 
-        # 关闭 npz 文件以避免 pickle 错误
-        self.inputs.close()
-        self.labels.close()
-
-    def _preprocess_data(self):
-        """
-        数据预处理, 分别处理连续特征和离散特征
-        """
-        # 碰撞波形数据 (x_acc)
-        # 形状 (N, 3, 150)，3 表示 X 和 Y 和 Z 方向，150 表示时间步长
-        # 可能存在噪声，不够平滑，尤其是y和z方向
-        # 对 X 和 Y 和 Z 方向的波形数据进行归一化
-        for i in range(3):  # 分别处理 X 和 Y 和 Z 方向
-            max_val = np.max(self.x_acc[:, i])
-            self.x_acc[:, i] = self.x_acc[:, i] / max_val
-
-        # 特征数据 (x_att)
-        # 形状 (N, 18)，18 个特征，包括连续和离散变量
-        # 特征索引：
-        # 0: impact_velocity (连续)
-        # 1: impact_angle (连续) 有正负
-        # 2: overlap (连续) 有正负
-        # 3: occupant_type (离散)
-        # 4: ll1 (连续)
-        # 5: ll2 (连续)
-        # 6: btf (连续)
-        # 7: pp (连续)
-        # 8: plp (连续)
-        # 9: lla_status (离散)
-        # 10: llattf (连续)
-        # 11: dz (离散)
-        # 12: ptf (连续)
-        # 13: aft (连续)
-        # 14: aav_status (离散)
-        # 15: ttf (连续)
-        # 16: sp (连续) : 座椅前后位置 (SP - Seat Position) 有正负
-        # 17: recline_angle (连续)  座椅靠背角度 (Recline angle) 有正负
-
-        self.continuous_indices = [0, 1, 2, 4, 5, 6, 7, 8, 10, 12, 13, 15, 16, 17]  # 连续特征的索引
-        self.discrete_indices = [3, 9, 11, 14]  # 离散特征的索引
-
-        # 处理连续特征
-        for idx in self.continuous_indices:
-            min_val = np.min(self.x_att[:, idx])
-            max_val = np.max(self.x_att[:, idx])
-            if idx in [1, 2, 16, 17]:
-                # 归一化考虑正负, 归一化到 [-1, 1]
-                self.x_att[:, idx] = self.x_att[:, idx] / max_val
-            else:
-                self.x_att[:, idx] = (self.x_att[:, idx] - min_val) / (max_val - min_val)  # 归一化到 [0, 1]
-
-        # 处理离散特征
-        for idx in self.discrete_indices:
-            le = LabelEncoder()
-            self.x_att[:, idx] = le.fit_transform(self.x_att[:, idx])  # 转换为从 0 开始的整数
-            self.label_encoders[idx] = le  # 存储 LabelEncoder
-            self.encoding_mappings[idx] = dict(zip(le.classes_, le.transform(le.classes_)))  # 存储编码映射关系
-
-    def print_encoding_mappings(self):
-        """
-        打印离散特征的编码映射关系。
-        """
-        for idx, mapping in self.encoding_mappings.items():
-            print(f"Feature {idx} encoding mapping: {mapping}")
+        self.continuous_indices = [0, 1, 2, 4, 5, 6, 7, 8, 10, 12, 13, 15, 16, 17]
+        self.discrete_indices = [3, 9, 11, 14]
+        self.num_classes_of_discrete = None
 
     def __len__(self):
-        return len(self.x_acc)
+        return len(self.case_ids)
 
     def __getitem__(self, idx):
-        """
-        根据索引获取数据。
-        """
-        x_acc = self.x_acc[idx]
-        x_att = self.x_att[idx]
-        
-        # --- 提取所有标签 ---
-        y_HIC = self.y_HIC[idx]
-        y_Dmax = self.y_Dmax[idx]
-        y_Nij = self.y_Nij[idx]
-        ais_head = self.ais_head[idx]
-        ais_chest = self.ais_chest[idx]
-        ais_neck = self.ais_neck[idx]
-        mais = self.mais[idx]
+        if self.x_acc is None or self.x_att_continuous is None or self.x_att_discrete is None:
+            raise RuntimeError("数据集尚未预处理。请先运行数据处理流程。")
 
-        x_att_continuous = x_att[self.continuous_indices]
-        x_att_discrete = x_att[self.discrete_indices]
-        
         return (
-            torch.tensor(x_acc, dtype=torch.float32),
-            torch.tensor(x_att_continuous, dtype=torch.float32),
-            torch.tensor(x_att_discrete, dtype=torch.long),
-            # --- 返回所有损伤指标和AIS等级 ---
-            torch.tensor(y_HIC, dtype=torch.float32),
-            torch.tensor(y_Dmax, dtype=torch.float32),
-            torch.tensor(y_Nij, dtype=torch.float32),
-            torch.tensor(ais_head, dtype=torch.long),
-            torch.tensor(ais_chest, dtype=torch.long),
-            torch.tensor(ais_neck, dtype=torch.long),
-            torch.tensor(mais, dtype=torch.long)
+            torch.tensor(self.x_acc[idx], dtype=torch.float32),
+            torch.tensor(self.x_att_continuous[idx], dtype=torch.float32),
+            torch.tensor(self.x_att_discrete[idx], dtype=torch.int),
+            torch.tensor(self.y_HIC[idx], dtype=torch.float32),
+            torch.tensor(self.y_Dmax[idx], dtype=torch.float32),
+            torch.tensor(self.y_Nij[idx], dtype=torch.float32),
+            torch.tensor(self.ais_head[idx], dtype=torch.int),
+            torch.tensor(self.ais_chest[idx], dtype=torch.int),
+            torch.tensor(self.ais_neck[idx], dtype=torch.int),
+            torch.tensor(self.mais[idx], dtype=torch.int)
         )
 
-if __name__ == '__main__':
-    # 导入所需的库
-    import time
-    import numpy as np
-    import pandas as pd
-    from torch.utils.data import Subset
-    from sklearn.model_selection import train_test_split
+class DataProcessor:
+    """
+    一个封装了数据预处理逻辑的类，包括拟合(fit)、转换(transform)和结果展示。
+    """
+    def __init__(self, top_k_waveform=20):
+        self.waveform_norm_factor = None
+        self.top_k_waveform = top_k_waveform
+        self.scaler_minmax = None
+        self.scaler_maxabs = None
+        self.encoders_discrete = None
+        
+        self.continuous_indices = [0, 1, 2, 4, 5, 6, 7, 8, 10, 12, 13, 15, 16, 17]
+        self.discrete_indices = [3, 9, 11, 14]
+        
+        self.minmax_indices_in_continuous = [i for i, orig_idx in enumerate(self.continuous_indices) if orig_idx not in [1, 2, 16, 17]]
+        self.maxabs_indices_in_continuous = [i for i, orig_idx in enumerate(self.continuous_indices) if orig_idx in [1, 2, 16, 17]]
+        
+        self.feature_names = {
+            0: "impact_velocity", 1: "impact_angle", 2: "overlap", 3: "occupant_type", 4: "ll1",
+            5: "ll2", 6: "btf", 7: "pp", 8: "plp", 9: "lla_status", 10: "llattf", 11: "dz",
+            12: "ptf", 13: "aft", 14: "aav_status", 15: "ttf", 16: "sp", 17: "recline_angle"
+        }
 
-    # 分割打包数据集并测试
-    start_time = time.time()
-    dataset = CrashDataset()
-    print("\nDataset loading time:", time.time() - start_time)
+    def fit(self, train_indices, dataset):
+        """
+        仅使用训练集数据来拟合所有的scalers和encoders。
+        """
+        # --- 拟合波形数据的全局归一化因子 ---
+        train_x_acc_raw = dataset.x_acc_raw[train_indices]
+        # 展平所有波形数据并取绝对值
+        flat_abs_waveforms = np.abs(train_x_acc_raw).flatten()
+        # 排序并取top k
+        top_k_values = np.sort(flat_abs_waveforms)[-self.top_k_waveform:]
+        # 计算平均值作为归一化因子
+        self.waveform_norm_factor = np.mean(top_k_values)
+        if self.waveform_norm_factor < 1e-6: self.waveform_norm_factor = 1.0
 
-    # --- Robust Stratified Splitting ---
+        # --- 拟合标量特征的Scaler和Encoder ---
+        train_x_att_continuous_raw = dataset.x_att_raw[train_indices][:, self.continuous_indices]
+        train_x_att_discrete_raw = dataset.x_att_raw[train_indices][:, self.discrete_indices]
 
-    # 1. 定义数据集划分比例
-    # 即使测试集比例很小，也在这里定义，方便未来调整
-    TRAIN_RATIO = 0.8
-    VAL_RATIO = 0.19
-    # TEST_RATIO 将是剩余部分，确保总和为1
-    TEST_RATIO = round(1.0 - TRAIN_RATIO - VAL_RATIO, 2)
-    if TEST_RATIO < 0:
-        raise ValueError("TRAIN_RATIO and VAL_RATIO cannot sum to more than 1.")
+        self.scaler_minmax = MinMaxScaler(feature_range=(0, 1))
+        self.scaler_maxabs = MaxAbsScaler()
+        self.scaler_minmax.fit(train_x_att_continuous_raw[:, self.minmax_indices_in_continuous])
+        self.scaler_maxabs.fit(train_x_att_continuous_raw[:, self.maxabs_indices_in_continuous])
+        
+        self.encoders_discrete = [LabelEncoder() for _ in range(train_x_att_discrete_raw.shape[1])]
+        for i in range(train_x_att_discrete_raw.shape[1]):
+            self.encoders_discrete[i].fit(train_x_att_discrete_raw[:, i])
 
+    def transform(self, dataset):
+        """
+        使用已拟合的处理器转换整个数据集，并填充回dataset对象。
+        """
+        if self.waveform_norm_factor is None or self.scaler_minmax is None or self.encoders_discrete is None:
+            raise RuntimeError("处理器尚未拟合。请先调用fit方法。")
 
-    # 2. 准备用于分层的标签和索引
+        # --- 转换波形数据 ---
+        dataset.x_acc = dataset.x_acc_raw / self.waveform_norm_factor
+        
+        # --- 转换标量数据 ---
+        x_att_continuous_raw = dataset.x_att_raw[:, self.continuous_indices]
+        x_att_discrete_raw = dataset.x_att_raw[:, self.discrete_indices]
+
+        x_att_continuous_processed = np.zeros_like(x_att_continuous_raw, dtype=np.float32)
+        x_att_continuous_processed[:, self.minmax_indices_in_continuous] = self.scaler_minmax.transform(x_att_continuous_raw[:, self.minmax_indices_in_continuous])
+        x_att_continuous_processed[:, self.maxabs_indices_in_continuous] = self.scaler_maxabs.transform(x_att_continuous_raw[:, self.maxabs_indices_in_continuous])
+        dataset.x_att_continuous = x_att_continuous_processed
+
+        x_att_discrete_processed = np.zeros_like(x_att_discrete_raw, dtype=np.int64)
+        num_classes = []
+        for i in range(x_att_discrete_raw.shape[1]):
+            x_att_discrete_processed[:, i] = self.encoders_discrete[i].transform(x_att_discrete_raw[:, i])
+            num_classes.append(len(self.encoders_discrete[i].classes_))
+        dataset.x_att_discrete = x_att_discrete_processed
+        dataset.num_classes_of_discrete = num_classes
+        
+        return dataset
+    
+    def print_fit_summary(self):
+        """
+        打印已拟合的scalers和encoders的统计信息。
+        """
+        if self.waveform_norm_factor is None or self.scaler_minmax is None:
+            print("处理器尚未拟合。")
+            return
+        
+        print("\n--- 数据处理器拟合结果摘要 ---")
+        
+        print(f"\n[碰撞波形 (x_acc) 全局归一化因子]")
+        print(f"  - 基于训练集Top {self.top_k_waveform} 最大绝对值点的平均值: {self.waveform_norm_factor:.4f}")
+
+        print("\n[连续标量特征 (x_att_continuous) Scaler 统计量]")
+        print("  - MinMaxScaler (归一化至 [0, 1]):")
+        for i, idx_in_cont in enumerate(self.minmax_indices_in_continuous):
+            orig_idx = self.continuous_indices[idx_in_cont]
+            name = self.feature_names.get(orig_idx, f"特征 {orig_idx}")
+            print(f"    - {name} (Idx {orig_idx}): Min={self.scaler_minmax.data_min_[i]:.4f}, Max={self.scaler_minmax.data_max_[i]:.4f}")
+        
+        print("  - MaxAbsScaler (归一化至 [-1, 1]):")
+        for i, idx_in_cont in enumerate(self.maxabs_indices_in_continuous):
+            orig_idx = self.continuous_indices[idx_in_cont]
+            name = self.feature_names.get(orig_idx, f"特征 {orig_idx}")
+            print(f"    - {name} (Idx {orig_idx}): MaxAbs={self.scaler_maxabs.max_abs_[i]:.4f}")
+
+        print("\n[离散标量特征 (x_att_discrete) LabelEncoder 映射]")
+        for i, encoder in enumerate(self.encoders_discrete):
+            orig_idx = self.discrete_indices[i]
+            name = self.feature_names.get(orig_idx, f"特征 {orig_idx}")
+            mapping = dict(zip(encoder.classes_, encoder.transform(encoder.classes_)))
+            print(f"  - {name} (Idx {orig_idx}):")
+            print(f"    - 映射关系: {mapping}")
+        print("---------------------------------\n")
+
+    def save(self, path):
+        joblib.dump(self, path)
+
+    @staticmethod
+    def load(path):
+        return joblib.load(path)
+
+def split_data(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
+    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
     labels = dataset.mais
     indices = np.arange(len(dataset))
-
-    # 3. 第一次划分：严格分层地划分出训练集 vs. (验证集 + 测试集)
     
-    # 找出并分离出样本数少于2的 "孤儿" 类别，直接放入训练集
     label_counts = pd.Series(labels).value_counts()
-    # 最小分组数至少为2，所以任何少于2个样本的类别都无法分层
     insufficient_samples_labels = label_counts[label_counts < 2].index.tolist()
     
     train_indices_final = []
-    # 剩余待划分的索引
     remaining_indices = indices
-
     if insufficient_samples_labels:
-        print(f"\nWarning: Found classes with < 2 samples: {insufficient_samples_labels}")
-        print("These will be moved to the training set to allow stratification.")
-        
-        # 将孤儿样本的索引直接加入最终的训练集
         singleton_mask = np.isin(labels, insufficient_samples_labels)
         train_indices_final.extend(indices[singleton_mask])
-        
-        # 从待划分的索引中移除这些孤儿样本
         remaining_indices = indices[~singleton_mask]
     
     remaining_labels = labels[remaining_indices]
 
-    # 对剩余的主体数据进行分层抽样
-    # 计算剩余数据中应该有多少比例作为测试/验证集
-    temp_size = VAL_RATIO + TEST_RATIO
-    
-    # Stratify split the rest of the data
+    temp_size = val_ratio + test_ratio
     train_main_indices, temp_indices, _, _ = train_test_split(
-        remaining_indices, remaining_labels,
-        test_size=temp_size,
-        random_state=GLOBAL_SEED,
-        stratify=remaining_labels
+        remaining_indices, remaining_labels, test_size=temp_size, random_state=GLOBAL_SEED, stratify=remaining_labels
     )
-    
-    # 将分层抽样出的训练索引与之前的孤儿索引合并
     train_indices_final.extend(train_main_indices)
     train_indices = np.array(train_indices_final)
 
-
-    # 4. 第二次划分：对 temp_indices 进行 *非分层* 的随机划分
-    # 这是关键改动：由于 temp_indices 样本量小，不进行分层以避免错误
-    if len(temp_indices) > 0 and TEST_RATIO > 0:
-        # 计算验证集和测试集在 temp_indices 中的相对比例
-        relative_test_ratio = TEST_RATIO / (VAL_RATIO + TEST_RATIO)
-        
-        # 检查是否因为样本太少导致无法划分
+    if len(temp_indices) > 0 and test_ratio > 0:
+        relative_test_ratio = test_ratio / temp_size
         if len(temp_indices) < 2:
-             # 如果临时集只有一个样本，直接全部分给验证集，测试集为空
              val_indices = temp_indices
-             test_indices = []
-             print("\nWarning: Not enough samples for a separate test set. Test set will be empty.")
+             test_indices = np.array([], dtype=int)
         else:
             val_indices, test_indices = train_test_split(
-                temp_indices,
-                test_size=relative_test_ratio,
-                random_state=GLOBAL_SEED
-                # 注意：此处没有 stratify 参数
+                temp_indices, test_size=relative_test_ratio, random_state=GLOBAL_SEED
             )
     else:
-        # 如果 temp_indices 为空或 TEST_RATIO 为0
         val_indices = temp_indices
-        test_indices = []
+        test_indices = np.array([], dtype=int)
+        
+    return train_indices, val_indices, test_indices
 
-    # 5. 使用 PyTorch 的 Subset 创建最终的数据集
+
+if __name__ == '__main__':
+    start_time = time.time()
+    
+    dataset = CrashDataset(input_file='./data/data_input.npz', label_file='./data/data_labels.npz')
+    print(f"\n原始数据加载完成, 耗时: {time.time() - start_time:.2f}s")
+
+    train_indices, val_indices, test_indices = split_data(dataset, train_ratio=0.8, val_ratio=0.19, test_ratio=0.01)
+    
+    processor = DataProcessor(top_k_waveform=50)
+    processor.fit(train_indices, dataset)
+    
+    processor.print_fit_summary()
+
+    dataset = processor.transform(dataset)
+    print("整个数据集已使用训练集统计量完成转换。")
+
+    processor.save('./data/preprocessors.joblib')
+    print("处理器已保存至 './data/preprocessors.joblib'")
+
     train_dataset = Subset(dataset, train_indices)
     val_dataset = Subset(dataset, val_indices)
     test_dataset = Subset(dataset, test_indices)
 
-    # --- Splitting End ---
+    torch.save(train_dataset, './data/train_dataset.pt')
+    torch.save(val_dataset, './data/val_dataset.pt')
+    torch.save(test_dataset, './data/test_dataset.pt')
+    print("\n处理后的训练、验证和测试数据集已保存。")
 
-    print(f"\nDataset split sizes:")
-    print(f"  - Total: {len(dataset)}")
-    print(f"  - Train: {len(train_dataset)}")
-    print(f"  - Validation: {len(val_dataset)}")
-    print(f"  - Test: {len(test_dataset)}")
+    print(f"\n数据集划分大小:")
+    print(f"  - 总计: {len(dataset)}")
+    print(f"  - 训练集: {len(train_dataset)}")
+    print(f"  - 验证集: {len(val_dataset)}")
+    print(f"  - 测试集: {len(test_dataset)}")
 
-    # 验证标签分布
     def get_label_distribution(subset):
-        if len(subset.indices) == 0:
-            return "Empty"
+        if not subset.indices.any(): return "空"
         labels = [subset.dataset.mais[i] for i in subset.indices]
         unique, counts = np.unique(labels, return_counts=True)
         return dict(zip(unique, counts))
 
-    print("\nMAIS label distribution in each subset:")
-    print(f"  - Train: {get_label_distribution(train_dataset)}")
-    print(f"  - Validation: {get_label_distribution(val_dataset)}")
-    print(f"  - Test: {get_label_distribution(test_dataset)}")
-
-    # 保存处理后的数据集
-    torch.save(train_dataset, './data/train_dataset.pt')
-    torch.save(val_dataset, './data/val_dataset.pt')
-    torch.save(test_dataset, './data/test_dataset.pt')
-    print("\nTrain, validation, and test datasets saved successfully.")
-
-
-    # 测试 DataLoader 是否能正常工作
-    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=128, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False, num_workers=0)
-
-    dataset.print_encoding_mappings()
+    print("\n各子集的MAIS标签分布:")
+    print(f"  - 训练集: {get_label_distribution(train_dataset)}")
+    print(f"  - 验证集: {get_label_distribution(val_dataset)}")
+    print(f"  - 测试集: {get_label_distribution(test_dataset)}")
     
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
     print("\nTesting DataLoader...")
     batch_start_time = time.time()
     for i, batch in enumerate(train_loader):
@@ -304,4 +301,4 @@ if __name__ == '__main__':
         print("y_HIC shape:", y_HIC.shape)
         print("MAIS shape:", mais.shape)
         break
-    print("batch loading time:", time.time() - batch_start_time)
+    print(f"batch loading time: {time.time() - batch_start_time:.4f}s")

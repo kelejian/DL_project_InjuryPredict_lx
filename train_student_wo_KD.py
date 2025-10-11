@@ -122,14 +122,14 @@ if __name__ == "__main__":
     # 1. 优化与训练相关
     Epochs = 1000
     Batch_size = 512
-    Learning_rate = 0.022
+    Learning_rate = 0.024
     Learning_rate_min = 5e-7
-    weight_decay = 5e-4
+    weight_decay = 2e-4
     Patience = 1000
 
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.2
+    weight_factor_classify = 1.1
     weight_factor_sample = 0.5
     loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
 
@@ -140,14 +140,14 @@ if __name__ == "__main__":
     mlpD_hidden = 128
     encoder_output_dim = 96
     decoder_output_dim = 32
-    dropout = 0.20
+    dropout = 0.25
     ############################################################################################
     ############################################################################################
 
     if Patience > Epochs: Patience = Epochs
 
     # 加载数据集对象
-    dataset = CrashDataset()
+    # dataset = CrashDataset()
     train_dataset = torch.load("./data/train_dataset.pt")
     val_dataset = torch.load("./data/val_dataset.pt")
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
@@ -156,7 +156,7 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     model = models.StudentModel(
-        num_classes_of_discrete=dataset.num_classes_of_discrete,
+        num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete,
         num_layers_of_mlpE=num_layers_of_mlpE, num_layers_of_mlpD=num_layers_of_mlpD,
         mlpE_hidden=mlpE_hidden, mlpD_hidden=mlpD_hidden,
         encoder_output_dim=encoder_output_dim, decoder_output_dim=decoder_output_dim,

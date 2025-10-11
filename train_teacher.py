@@ -121,19 +121,19 @@ if __name__ == "__main__":
     # 1. 优化与训练相关
     Epochs = 1000
     Batch_size = 512
-    Learning_rate = 0.022
+    Learning_rate = 0.024
     Learning_rate_min = 1e-06
-    weight_decay = 1e-3
+    weight_decay = 5e-4
     Patience = 1000 # 早停轮数
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.1
+    weight_factor_classify = 1.2
     weight_factor_sample = 0.5
-    loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
+    loss_weights = (0.20, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
-    Ksize_init = 8
+    Ksize_init = 6
     Ksize_mid = 3
     num_blocks_of_tcn = 3
     tcn_channels_list = [64, 128, 128]  # 每个 TCN 块的输出通道数
@@ -143,16 +143,18 @@ if __name__ == "__main__":
     mlpD_hidden = 128
     encoder_output_dim = 96
     decoder_output_dim = 32
-    dropout = 0.4
+    dropout_MLP = 0.35
+    dropout_TCN = 0.15
     use_channel_attention = True  # 是否使用通道注意力机制
-    fixed_channel_weight = [0.6, 0.4, 0]  # 固定的通道注意力权重(None表示自适应学习)
+    fixed_channel_weight = [0.65, 0.35, 0]  # 固定的通道注意力权重(None表示自适应学习)
     ############################################################################################
     ############################################################################################
 
     if Patience > Epochs: Patience = Epochs
 
+    # --- 修改：不再创建未处理的CrashDataset实例，直接加载已处理的数据集 ---
     # 加载数据集对象
-    dataset = CrashDataset()
+    # dataset = CrashDataset()
     train_dataset = torch.load("./data/train_dataset.pt")
     val_dataset = torch.load("./data/val_dataset.pt")
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
@@ -164,7 +166,7 @@ if __name__ == "__main__":
     model = models.TeacherModel(
         Ksize_init=Ksize_init,
         Ksize_mid=Ksize_mid,
-        num_classes_of_discrete=dataset.num_classes_of_discrete,
+        num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete, # --- 修改：从加载的训练集中获取元数据 ---
         num_blocks_of_tcn=num_blocks_of_tcn,
         tcn_channels_list=tcn_channels_list,
         num_layers_of_mlpE=num_layers_of_mlpE,
@@ -173,7 +175,8 @@ if __name__ == "__main__":
         mlpD_hidden=mlpD_hidden,
         encoder_output_dim=encoder_output_dim,
         decoder_output_dim=decoder_output_dim,
-        dropout=dropout,
+        dropout_MLP=dropout_MLP,
+        dropout_TCN=dropout_TCN,
         use_channel_attention=use_channel_attention,
         fixed_channel_weight=fixed_channel_weight
     ).to(device)
@@ -398,7 +401,7 @@ if __name__ == "__main__":
                 "num_layers_of_mlpE": num_layers_of_mlpE, "num_layers_of_mlpD": num_layers_of_mlpD,
                 "mlpE_hidden": mlpE_hidden, "mlpD_hidden": mlpD_hidden,
                 "encoder_output_dim": encoder_output_dim, "decoder_output_dim": decoder_output_dim,
-                "dropout": dropout,
+                "dropout_MLP": dropout_MLP, "dropout_TCN": dropout_TCN,
                 "use_channel_attention": use_channel_attention,
                 "fixed_channel_weight": fixed_channel_weight
             }

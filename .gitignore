@@ -10,6 +10,8 @@ __pycache__/
 runs/
 ckpt_base/
 results_base/
+onnx_models/
+logs/
 #data/  # 如果数据集很大或不希望上传
 
 # ONNX 模型文件

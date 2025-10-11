@@ -190,16 +190,16 @@ if __name__ == "__main__":
     
     model_params = training_record["hyperparameters"]["model"]
     
-    dataset = CrashDataset()
+    train_dataset = torch.load("./data/train_dataset.pt") # 仅用于获取 num_classes_of_discrete
     test_dataset1 = torch.load("./data/val_dataset.pt")
     test_dataset2 = torch.load("./data/test_dataset.pt")
     test_dataset = ConcatDataset([test_dataset1, test_dataset2])
     test_loader = DataLoader(test_dataset, batch_size=128, shuffle=False, num_workers=0)
 
     if "teacher" in args.run_dir.lower():
-        model = models.TeacherModel(**model_params, num_classes_of_discrete=dataset.num_classes_of_discrete).to(device)
+        model = models.TeacherModel(**model_params, num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete).to(device)
     elif "student" in args.run_dir.lower():
-        model = models.StudentModel(**model_params, num_classes_of_discrete=dataset.num_classes_of_discrete).to(device)
+        model = models.StudentModel(**model_params, num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete).to(device)
     else:
         raise ValueError("run_dir name must contain 'teacher' or 'student'.")
     

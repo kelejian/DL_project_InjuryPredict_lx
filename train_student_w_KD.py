@@ -149,20 +149,20 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 教师模型路径
-    teacher_run_dir = ".\\runs\\TeacherModel_10091402" # <-- 教师模型运行目录
+    teacher_run_dir = ".\\runs\\TeacherModel_10111315" # <-- 教师模型运行目录
     teacher_model_name = "best_mais_accu.pth"
 
     # 2. 优化与训练相关
     Epochs = 1000
     Batch_size = 512
-    Learning_rate = 0.022
+    Learning_rate = 0.024
     Learning_rate_min = 5e-7
-    weight_decay = 5e-4
+    weight_decay = 2e-4
     Patience = 1000
 
     # 3. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.2
+    weight_factor_classify = 1.1
     weight_factor_sample = 0.5
     loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
     distill_encoder_weight = 0.4 # 编码器蒸馏损失权重
@@ -173,7 +173,7 @@ if __name__ == "__main__":
     num_layers_of_mlpD = 4
     mlpE_hidden = 160
     mlpD_hidden = 128
-    dropout = 0.20
+    dropout = 0.25
     ############################################################################################
     ############################################################################################
 
@@ -185,7 +185,7 @@ if __name__ == "__main__":
         teacher_hyperparams = json.load(f)["hyperparameters"]["model"]
     
     # 加载数据集对象
-    dataset = CrashDataset()
+    # dataset = CrashDataset()
     train_dataset = torch.load("./data/train_dataset.pt")
     val_dataset = torch.load("./data/val_dataset.pt")
     train_loader = DataLoader(train_dataset, batch_size=Batch_size, shuffle=True, num_workers=0)
@@ -195,7 +195,7 @@ if __name__ == "__main__":
 
     # --- 初始化学生模型 (部分参数与教师模型对齐) ---
     student_model = models.StudentModel(
-        num_classes_of_discrete=dataset.num_classes_of_discrete,
+        num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete,
         num_layers_of_mlpE=num_layers_of_mlpE, num_layers_of_mlpD=num_layers_of_mlpD,
         mlpE_hidden=mlpE_hidden, mlpD_hidden=mlpD_hidden,
         encoder_output_dim=teacher_hyperparams["encoder_output_dim"],
@@ -204,7 +204,7 @@ if __name__ == "__main__":
     ).to(device)
 
     # --- 初始化教师模型 ---
-    teacher_model = models.TeacherModel(**teacher_hyperparams, num_classes_of_discrete=dataset.num_classes_of_discrete).to(device)
+    teacher_model = models.TeacherModel(**teacher_hyperparams, num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete).to(device)
     teacher_model.load_state_dict(torch.load(teacher_model_path))
     teacher_model.eval()
 
