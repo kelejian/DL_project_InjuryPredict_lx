@@ -420,29 +420,31 @@ if __name__ == "__main__":
     # 2. 创建并预处理一个样本输入
     print("\n创建并预处理样本输入...")
     # ============================================================================
-    raw_inputs = {
-        "impact_velocity": 50,
-        "impact_angle": 0,
-        "overlap": 0.5,
-        "occupant_type": 1,
-        "ll1": 5.0,
-        "ll2": 3.0,
-        "btf": 50,
-        "pp": 70,
-        "plp": 50,
-        "lla_status": 1,
-        "llattf": 80,
-        "dz": 2,
-        "ptf": 57,
-        "aft": 50,
-        "aav_status": 1,
-        "ttf": 70,
-        "sp": 50,
-        "recline_angle": 5,
-        "waveform": -np.random.randn(3, 150) * 200  # 形状 (3, 150)
+    raw_input_conditions = {
+        # --- 碰撞工况 (PulseCNN 和 TeacherModel 共用) ---
+        "impact_velocity": 33,      # 碰撞速度 (km/h)
+        "impact_angle": 0,         # 碰撞角度 (度)
+        "overlap": 1,              # 重叠率
+        
+        # --- 约束系统参数 (仅 TeacherModel 使用) ---
+        "occupant_type": 1,             
+        "ll1": 4,             
+        "ll2": 4,                 
+        "btf": 20,                
+        "pp": 60,
+        "ptf": 27,
+        "plp": 50,                 
+        "lla_status": 0,                 
+        "llattf": 0,               
+        "dz": 1,                                            
+        "aft": 20,                  
+        "aav_status": 0,                     
+        "ttf": 0,                   
+        "sp": 0,               
+        "recline_angle": 0   
     }
     # ============================================================================
-    raw_params, raw_waveform = create_sample_raw_input(raw_inputs)
+    raw_params, raw_waveform = create_sample_raw_input(raw_input_conditions)
     sample_inputs = preprocess_input(raw_params, raw_waveform, processor)
     
     # 3. 加载并导出教师模型
