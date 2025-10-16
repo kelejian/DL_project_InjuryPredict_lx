@@ -1,3 +1,7 @@
+import os
+os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'
+import warnings
+warnings.filterwarnings('ignore')
 import joblib
 import optuna
 from optuna.storages import RDBStorage

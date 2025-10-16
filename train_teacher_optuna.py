@@ -1,6 +1,9 @@
+import os
+os.environ['FOR_DISABLE_CONSOLE_CTRL_HANDLER'] = 'T'
+import warnings
+warnings.filterwarnings('ignore')
 import optuna
 import torch
-import os
 import json
 import numpy as np
 from torch import optim
@@ -10,6 +13,7 @@ from optuna.storages import RDBStorage
 import joblib
 
 from utils import models
+from utils.dataset_prepare import CrashDataset
 from utils.AIS_cal import AIS_cal_head, AIS_cal_chest, AIS_cal_neck
 from utils.weighted_loss import weighted_loss
 from utils.set_random_seed import set_random_seed
@@ -78,24 +82,32 @@ def run_one_epoch(model, loader, criterion, device, optimizer=None):
 def objective(trial):
     """定义Optuna的多目标优化函数"""
     # --- 超参数搜索空间 (与之前保持一致) ---
-    learning_rate = trial.suggest_float("learning_rate", 0.008, 0.03, log=True)
-    weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-3, log=True)
-    weight_factor_classify = trial.suggest_float("weight_factor_classify", 1.0, 1.5, step=0.05)
-    weight_factor_sample = trial.suggest_float("weight_factor_sample", 0, 1.0, step=0.05)
+    learning_rate = trial.suggest_float("learning_rate", 0.016, 0.027, log=True)
+    weight_decay = trial.suggest_float("weight_decay", 1e-4, 2e-3, log=True)
+    weight_factor_classify = trial.suggest_float("weight_factor_classify", 1.1, 1.3, step=0.02)
+    weight_factor_sample = trial.suggest_float("weight_factor_sample", 0, 0.32, step=0.02)
     
-    Ksize_init = trial.suggest_int("Ksize_init", 4, 10, step=2)
-    Ksize_mid = trial.suggest_categorical("Ksize_mid", [3, 5])
-    num_blocks_of_tcn = trial.suggest_int("num_blocks_of_tcn", 2, 5)
-    num_layers_of_mlpE = trial.suggest_int("num_layers_of_mlpE", 3, 5)
-    num_layers_of_mlpD = trial.suggest_int("num_layers_of_mlpD", 3, 5)
-    mlpE_hidden = trial.suggest_int("mlpE_hidden", 128, 256, step=32)
-    mlpD_hidden = trial.suggest_int("mlpD_hidden", 96, 192, step=32)
-    encoder_output_dim = trial.suggest_categorical("encoder_output_dim", [64, 96, 128])
-    decoder_output_dim = trial.suggest_categorical("decoder_output_dim", [16, 32, 48])
-    dropout_MLP = trial.suggest_float("dropout_MLP", 0.1, 0.45, step=0.05)
-    dropout_TCN = trial.suggest_float("dropout_TCN", 0.05, 0.3, step=0.05)
-    loss_weights_head = trial.suggest_float("loss_weights_head", 0.15, 0.4, step=0.05)
-    loss_weights_neck = trial.suggest_float("loss_weights_neck", 15, 40, step=2.5)
+    # Ksize_init = trial.suggest_int("Ksize_init", 4, 10, step=2)
+    Ksize_init = 8
+    # Ksize_mid = trial.suggest_categorical("Ksize_mid", [3, 5])
+    Ksize_mid = trial.suggest_int("Ksize_mid", 5, 7, step=2)
+    # num_blocks_of_tcn = trial.suggest_int("num_blocks_of_tcn", 2, 5)
+    num_blocks_of_tcn = 3
+    num_layers_of_mlpE = trial.suggest_int("num_layers_of_mlpE", 3, 4)
+    num_layers_of_mlpD = trial.suggest_int("num_layers_of_mlpD", 3, 4)
+    # mlpE_hidden = trial.suggest_int("mlpE_hidden", 128, 256, step=32)
+    mlpE_hidden = 224
+    # mlpD_hidden = trial.suggest_int("mlpD_hidden", 128, 160, step=32)
+    mlpD_hidden = 160
+    encoder_output_dim = trial.suggest_int("encoder_output_dim", 64, 96, step=16)
+    # decoder_output_dim = trial.suggest_categorical("decoder_output_dim", [16, 32, 48])
+    decoder_output_dim = trial.suggest_int("decoder_output_dim", 16, 32, step=16)
+    # dropout_MLP = trial.suggest_float("dropout_MLP", 0.1, 0.45, step=0.05)
+    dropout_MLP = trial.suggest_float("dropout_MLP", 0.1, 0.25, step=0.01)
+    # dropout_TCN = trial.suggest_float("dropout_TCN", 0.05, 0.3, step=0.05)
+    dropout_TCN = 0.15
+    loss_weights_head = trial.suggest_float("loss_weights_head", 0.20, 0.3, step=0.02)
+    loss_weights_neck = trial.suggest_float("loss_weights_neck", 20, 40, step=2)
 
     # 固定参数
     Epochs = 300 # Optuna中通常使用较少的Epochs进行快速评估
@@ -134,10 +146,10 @@ def objective(trial):
         val_metrics = run_one_epoch(model, val_loader, criterion, device, optimizer=None)
         scheduler.step()
 
-        # Optuna剪枝逻辑 (基于验证集损失)
-        trial.report(val_metrics['loss'], epoch)
-        if trial.should_prune():
-            raise optuna.TrialPruned()
+        # # Optuna剪枝逻辑 (基于验证集损失)
+        # trial.report(val_metrics['loss'], epoch)
+        # if trial.should_prune():
+        #     raise optuna.TrialPruned()
 
         # 为减少随机性，记录最后20轮的验证指标
         if epoch >= Epochs - 20:
@@ -152,9 +164,9 @@ def objective(trial):
     return avg_mais_acc, avg_head_acc, avg_chest_acc, avg_neck_acc
 
 if __name__ == "__main__":
-    # --- 修改：使用新的文件名和研究名称 ---
+
     study_file = "./runs/optuna_study_teacher_multiobj_acc.pkl"
-    study_name = "teacher_model_multiobj_acc_optimization"
+    study_name = "teacher_model_multiobj_acc_optimization_1016_2"
     db_path = "sqlite:///./runs/optuna_study.db"
     storage = RDBStorage(db_path)
 
@@ -180,7 +192,7 @@ if __name__ == "__main__":
 
     # 运行优化
     try:
-        study.optimize(objective, n_trials=100, callbacks=[save_study_callback])
+        study.optimize(objective, n_trials=200, callbacks=[save_study_callback])
     except KeyboardInterrupt:
         print("用户中断了优化。")
     finally:

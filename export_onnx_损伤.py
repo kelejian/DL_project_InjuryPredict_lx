@@ -328,7 +328,7 @@ def export_model(model, sample_inputs, output_path, model_type="teacher", opset_
         output_path,
         input_names=input_names,
         output_names=output_names,
-        # dynamic_axes=dynamic_axes,
+        # dynamic_axes=dynamic_axes, # 如果需要动态batch_size,取消注释此行
         do_constant_folding=True,
         opset_version=opset_version,
     )
@@ -422,12 +422,12 @@ if __name__ == "__main__":
     # ============================================================================
     raw_input_conditions = {
         # --- 碰撞工况 (PulseCNN 和 TeacherModel 共用) ---
-        "impact_velocity": 33,      # 碰撞速度 (km/h)
+        "impact_velocity": 61,      # 碰撞速度 (km/h)
         "impact_angle": 0,         # 碰撞角度 (度)
-        "overlap": 1,              # 重叠率
+        "overlap": 0.6,              # 重叠率
         
         # --- 约束系统参数 (仅 TeacherModel 使用) ---
-        "occupant_type": 1,             
+        "occupant_type": 2,             
         "ll1": 4,             
         "ll2": 4,                 
         "btf": 20,                
