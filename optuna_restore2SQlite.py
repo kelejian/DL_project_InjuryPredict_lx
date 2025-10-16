@@ -9,70 +9,71 @@ import json
 '''
 
 if __name__ == "__main__":
-    # --- 新增: 使用 argparse 使脚本更灵活 ---
-    parser = argparse.ArgumentParser(description="Restore Optuna study from a .pkl file to a SQLite database.")
-    parser.add_argument("--pkl_file", '-f', type=str, required=True, help="Path to the .pkl file to restore.")
-    parser.add_argument("--db_path", '-d', type=str, default="sqlite:///./runs/optuna_study.db", help="Path to the SQLite database file.")
-    parser.add_argument("--study_name", '-n', type=str, required=True, help="The name for the new study in the database.")
+    parser = argparse.ArgumentParser(description="从.pkl文件恢复Optuna study到SQLite数据库。")
+    parser.add_argument("--pkl_file", '-f', type=str, required=True, help="需要恢复的 .pkl 文件路径。")
+    parser.add_argument("--db_path", '-d', type=str, default="sqlite:///./runs/optuna_study.db", help="SQLite数据库文件路径。")
+    parser.add_argument("--study_name", '-n', type=str, required=True, help="在数据库中为研究指定的新名称。")
     args = parser.parse_args()
 
-    # 加载要恢复的 .pkl 文件
+    # 1. 加载要恢复的 .pkl 文件
     try:
         study_to_restore = joblib.load(args.pkl_file)
-        # 检查是否为 Study 对象
+        # 检查加载的对象是否为 Optuna 的 Study 对象
         if isinstance(study_to_restore, optuna.study.Study):
             trials = study_to_restore.trials
-            print(f"Loaded {len(trials)} trials from '{args.pkl_file}'.")
+            print(f"从 '{args.pkl_file}' 中成功加载 {len(trials)} 个试验。")
         else:
-            # 有时 .pkl 文件可能只保存了 best_trials 列表
-            print(f"Warning: The .pkl file does not contain a full Study object. Trying to load a list of trials.")
-            trials = study_to_restore
-            if not isinstance(trials, list) or not all(isinstance(t, optuna.trial.FrozenTrial) for t in trials):
-                 raise TypeError("The .pkl file does not contain a valid Study object or a list of FrozenTrial objects.")
-            print(f"Loaded {len(trials)} trials from the list in '{args.pkl_file}'.")
+            raise TypeError("加载的 .pkl 文件不包含一个有效的 Optuna Study 对象。")
 
     except FileNotFoundError:
-        print(f"Error: The file '{args.pkl_file}' was not found.")
+        print(f"错误: 文件 '{args.pkl_file}' 未找到。")
         exit()
     except Exception as e:
-        print(f"An error occurred while loading the .pkl file: {e}")
+        print(f"加载 .pkl 文件时发生错误: {e}")
         exit()
 
-    # --- 修改: 配置多目标优化的 directions ---
-    # 这个列表必须与您在训练脚本中使用的 directions 完全一致
-    study_directions = ["maximize", "minimize", "minimize", "minimize"]
+    # 2. --- 关键修改 ---
+    # 定义多目标优化的方向。这个列表必须与训练脚本中使用的 directions 完全一致！
+    # 新的目标是最大化四个准确率指标。
+    study_directions = ["maximize", "maximize", "maximize", "maximize"]
 
-    # 连接到数据库并创建新的 study
+    # 3. 连接到数据库并创建或加载研究
     storage = RDBStorage(args.db_path)
     new_study = optuna.create_study(
         study_name=args.study_name,
         storage=storage,
-        directions=study_directions,  # 使用多目标 directions
-        load_if_exists=True # 如果同名 study 已存在，则加载它
+        directions=study_directions,  # 使用与训练脚本匹配的多目标方向
+        load_if_exists=True # 如果同名研究已存在，则加载它，而不是报错
     )
-    print(f"Successfully created or loaded study '{args.study_name}' in '{args.db_path}'.")
+    print(f"成功创建或加载研究 '{args.study_name}' 于 '{args.db_path}'。")
 
-    # 将从 .pkl 文件中加载的 trial 数据逐个添加到新的 study 中
+    # 4. 将从 .pkl 文件中加载的 trial 数据逐个添加到新的 study 中
     added_trials_count = 0
     for trial in trials:
         try:
+            # add_trial 会检查试验是否已存在，避免重复添加
             new_study.add_trial(trial)
             added_trials_count += 1
         except Exception as e:
-            # 如果试验已存在或有其他问题，则打印警告
-            print(f"Warning: Could not add trial number {trial.number}. Reason: {e}")
+            print(f"警告: 无法添加试验 {trial.number}。原因: {e}")
 
-    print(f"Successfully added {added_trials_count} new trials to the study '{args.study_name}'.")
+    print(f"成功向研究 '{args.study_name}' 中添加了 {added_trials_count} 个新试验。")
 
-    # 打印新 study 的 Pareto 前沿结果
-    print("\n" + "="*50)
-    print(f"           Best Trials (Pareto Front) for '{args.study_name}'")
-    print("="*50)
+    # 5. --- 关键修改 ---
+    # 打印新研究的 Pareto 前沿结果，并更新标签以匹配新的优化目标
+    print("\n" + "="*60)
+    print(f"    研究 '{args.study_name}' 的帕累托前沿结果 (准确率优化)")
+    print("="*60)
     if new_study.best_trials:
         for trial in new_study.best_trials:
             print(f"Trial Number: {trial.number}")
-            print(f"  - Values (MAIS Acc, HIC MAE, Dmax MAE, Nij MAE): {trial.values}")
+            # trial.values 列表中的值与 study_directions 的顺序一一对应
+            print(f"  - Values (MAIS Acc, Head Acc, Chest Acc, Neck Acc):")
+            print(f"    - MAIS Acc:   {trial.values[0]:.2f}%")
+            print(f"    - Head Acc:   {trial.values[1]:.2f}%")
+            print(f"    - Chest Acc:  {trial.values[2]:.2f}%")
+            print(f"    - Neck Acc:   {trial.values[3]:.2f}%")
             print(f"  - Params: {json.dumps(trial.params, indent=4)}")
-            print("-" * 20)
+            print("-" * 30)
     else:
-        print("No best trials found yet.")
+        print("未找到最佳试验。")

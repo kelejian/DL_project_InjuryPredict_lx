@@ -241,6 +241,16 @@ if __name__ == "__main__":
     plot_confusion_matrix(cls_metrics_hic_3c['conf_matrix'], [0, 1, 3], 'Confusion Matrix - AIS Head (3C)', os.path.join(args.run_dir, "cm_head_3c.png"))
     print(f"All plots have been saved to {args.run_dir}")
 
+    # 模型参数量
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Model has {total_params} parameters.")
+
+    # 打印MAIS准确率, 和三个部位多分类准确率
+    print(f"MAIS Accuracy: {cls_metrics_mais['accuracy']:.2f}%")
+    print(f"Head AIS-6C Accuracy: {cls_metrics_head['accuracy']:.2f}%")
+    print(f"Chest AIS-5C Accuracy: {cls_metrics_chest['accuracy']:.2f}%")
+    print(f"Neck AIS-5C Accuracy: {cls_metrics_neck['accuracy']:.2f}%")
+
     # --- 5. 生成并保存 Markdown 报告 ---
     markdown_content = f"""# Model Evaluation Report
 
@@ -248,6 +258,7 @@ if __name__ == "__main__":
 - **Run Directory**: `{args.run_dir}`
 - **Weight File**: `{args.weight_file}`
 - **Model Type**: {"Teacher" if "teacher" in args.run_dir.lower() else "Student"}
+- **Total Parameters**: {total_params}
 - **Testset size**: {len(test_dataset)}
 ```
 

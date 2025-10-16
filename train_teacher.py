@@ -119,34 +119,34 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 优化与训练相关
-    Epochs = 1000
+    Epochs = 900
     Batch_size = 512
     Learning_rate = 0.024
-    Learning_rate_min = 1e-06
-    weight_decay = 5e-4
+    Learning_rate_min = 5e-07
+    weight_decay = 6e-4
     Patience = 1000 # 早停轮数
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.2
+    weight_factor_classify = 1.15
     weight_factor_sample = 0.5
-    loss_weights = (0.20, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
+    loss_weights = (0.25, 1.0, 24.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     Ksize_init = 6
     Ksize_mid = 3
-    num_blocks_of_tcn = 3
-    tcn_channels_list = [64, 128, 128]  # 每个 TCN 块的输出通道数
+    num_blocks_of_tcn = 4
+    tcn_channels_list = [64, 96, 128, 160]  # 每个 TCN 块的输出通道数
     num_layers_of_mlpE = 4
     num_layers_of_mlpD = 4
     mlpE_hidden = 160
     mlpD_hidden = 128
     encoder_output_dim = 96
     decoder_output_dim = 32
-    dropout_MLP = 0.35
+    dropout_MLP = 0.3
     dropout_TCN = 0.15
     use_channel_attention = True  # 是否使用通道注意力机制
-    fixed_channel_weight = [0.65, 0.35, 0]  # 固定的通道注意力权重(None表示自适应学习)
+    fixed_channel_weight = [0.7, 0.3, 0]  # 固定的通道注意力权重(None表示自适应学习)
     ############################################################################################
     ############################################################################################
 

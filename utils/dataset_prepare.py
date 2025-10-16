@@ -250,7 +250,7 @@ if __name__ == '__main__':
     dataset = CrashDataset(input_file='./data/data_input.npz', label_file='./data/data_labels.npz')
     print(f"\n原始数据加载完成, 耗时: {time.time() - start_time:.2f}s")
 
-    train_indices, val_indices, test_indices = split_data(dataset, train_ratio=0.8, val_ratio=0.19, test_ratio=0.01)
+    train_indices, val_indices, test_indices = split_data(dataset, train_ratio=0.85, val_ratio=0.14, test_ratio=0.01)
     
     processor = DataProcessor(top_k_waveform=50)
     processor.fit(train_indices, dataset)

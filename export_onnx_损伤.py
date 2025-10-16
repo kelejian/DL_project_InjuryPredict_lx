@@ -294,7 +294,7 @@ def preprocess_input(raw_params, raw_waveform, processor):
     # --- 3. 转换为PyTorch张量并增加batch维度 ---
     x_acc = torch.tensor(waveform_processed, dtype=torch.float32).unsqueeze(0)
     x_att_continuous = torch.tensor(continuous_processed, dtype=torch.float32)
-    x_att_discrete = torch.tensor(discrete_processed, dtype=torch.long)
+    x_att_discrete = torch.tensor(discrete_processed, dtype=torch.int32)
     
     return x_acc, x_att_continuous, x_att_discrete
 
@@ -328,7 +328,7 @@ def export_model(model, sample_inputs, output_path, model_type="teacher", opset_
         output_path,
         input_names=input_names,
         output_names=output_names,
-        dynamic_axes=dynamic_axes,
+        # dynamic_axes=dynamic_axes,
         do_constant_folding=True,
         opset_version=opset_version,
     )
