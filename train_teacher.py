@@ -18,7 +18,7 @@ from utils import models
 from utils.weighted_loss import weighted_loss
 from utils.dataset_prepare import CrashDataset
 from utils.AIS_cal import AIS_cal_head, AIS_cal_chest, AIS_cal_neck 
-from utils.set_random_seed import set_random_seed
+from utils.set_random_seed import set_random_seed, GLOBAL_SEED
 
 set_random_seed()
 
@@ -122,7 +122,7 @@ if __name__ == "__main__":
     Epochs = 900
     Batch_size = 512
     Learning_rate = 0.02
-    Learning_rate_min = 1e-07
+    Learning_rate_min = 5e-7
     weight_decay = 6e-4
     Patience = 1000 # 早停轮数
     
@@ -361,6 +361,10 @@ if __name__ == "__main__":
 
         print(f"            | Time: {time.time()-epoch_start_time:.2f}s")
 
+    # 保存最后的模型
+    torch.save(model.state_dict(), os.path.join(run_dir, "final_model.pth"))
+    print("Final model saved.")
+
     writer.close()
 
     # --- 类型转换函数 ---
@@ -383,6 +387,7 @@ if __name__ == "__main__":
 
     # --- 完整记录超参数和最终结果 ---
     results = {
+        'GLOBAL_SEED': GLOBAL_SEED,
         "Trainset_size": len(train_dataset),
         "Valset_size": len(val_dataset),
         "hyperparameters": {

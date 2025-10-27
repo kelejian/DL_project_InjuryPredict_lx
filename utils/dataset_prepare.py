@@ -204,11 +204,59 @@ class DataProcessor:
     def load(path):
         return joblib.load(path)
 
-def split_data(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
-    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
-    labels = dataset.mais
-    indices = np.arange(len(dataset))
+def split_data(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, special_case_assignments=None):
+    """
+    划分数据集为训练集、验证集和测试集。
+    Args:
+    dataset (CrashDataset): 要划分的数据集实例。
+    train_ratio (float): 训练集比例。
+    val_ratio (float): 验证集比例。
+    test_ratio (float): 测试集比例。
+    special_case_assignments (dict): 一个字典，用于强制分配 case_id。
     
+    返回:
+    (final_train_indices, final_val_indices, final_test_indices, split_summary)
+    """
+    assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
+    
+    # --- 1. 处理特殊分配 (保持不变) ---
+    case_id_map = {case_id: idx for idx, case_id in enumerate(dataset.case_ids)}
+    
+    forced_train_indices_set = set()
+    forced_val_indices_set = set()
+    forced_test_indices_set = set()
+    exclude_indices_set = set()
+    
+    forced_counts = {'train': 0, 'valid': 0, 'test': 0, 'exclude': 0}
+
+    if special_case_assignments:
+        for case_id in special_case_assignments.get('train', []):
+            if case_id in case_id_map:
+                forced_train_indices_set.add(case_id_map[case_id])
+                forced_counts['train'] += 1
+        for case_id in special_case_assignments.get('valid', []):
+            if case_id in case_id_map:
+                forced_val_indices_set.add(case_id_map[case_id])
+                forced_counts['valid'] += 1
+        for case_id in special_case_assignments.get('test', []):
+            if case_id in case_id_map:
+                forced_test_indices_set.add(case_id_map[case_id])
+                forced_counts['test'] += 1
+        for case_id in special_case_assignments.get('exclude', []):
+            if case_id in case_id_map:
+                exclude_indices_set.add(case_id_map[case_id])
+                forced_counts['exclude'] += 1
+    
+    forced_indices = forced_train_indices_set | forced_val_indices_set | forced_test_indices_set
+    
+    all_indices = np.arange(len(dataset))
+    remaining_indices_for_split = np.array(list(set(all_indices) - forced_indices - exclude_indices_set))
+    
+    # --- 2. 严格按照原逻辑划分【剩余的】索引 ---
+    
+    labels = dataset.mais[remaining_indices_for_split]
+    indices = remaining_indices_for_split
+
     label_counts = pd.Series(labels).value_counts()
     insufficient_samples_labels = label_counts[label_counts < 2].index.tolist()
     
@@ -217,42 +265,111 @@ def split_data(dataset, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1):
     if insufficient_samples_labels:
         singleton_mask = np.isin(labels, insufficient_samples_labels)
         train_indices_final.extend(indices[singleton_mask])
-        remaining_indices = indices[~singleton_mask]
+        remaining_indices_mask = ~singleton_mask
+        remaining_indices = indices[remaining_indices_mask]
+        labels = labels[remaining_indices_mask] # labels 必须同步更新
     
-    remaining_labels = labels[remaining_indices]
+    remaining_labels = labels
 
     temp_size = val_ratio + test_ratio
-    train_main_indices, temp_indices, _, _ = train_test_split(
-        remaining_indices, remaining_labels, test_size=temp_size, random_state=GLOBAL_SEED, stratify=remaining_labels
-    )
+    if len(remaining_indices) < 2:
+        train_main_indices = remaining_indices
+        temp_indices = np.array([], dtype=int)
+    elif len(np.unique(remaining_labels)) < 2:
+         train_main_indices, temp_indices = train_test_split(
+            remaining_indices, test_size=temp_size, random_state=GLOBAL_SEED
+         )
+    else:
+        # 第一次划分，使用 stratify
+        train_main_indices, temp_indices, _, _ = train_test_split(
+            remaining_indices, remaining_labels, test_size=temp_size, random_state=GLOBAL_SEED, stratify=remaining_labels
+        )
+    
     train_indices_final.extend(train_main_indices)
-    train_indices = np.array(train_indices_final)
+    auto_train_indices = np.array(train_indices_final) # 自动划分的训练集
 
     if len(temp_indices) > 0 and test_ratio > 0:
         relative_test_ratio = test_ratio / temp_size
         if len(temp_indices) < 2:
-             val_indices = temp_indices
-             test_indices = np.array([], dtype=int)
+             auto_val_indices = temp_indices
+             auto_test_indices = np.array([], dtype=int)
         else:
-            val_indices, test_indices = train_test_split(
-                temp_indices, test_size=relative_test_ratio, random_state=GLOBAL_SEED
+            # *** 不使用stratify ***
+            auto_val_indices, auto_test_indices = train_test_split(
+                temp_indices, 
+                test_size=relative_test_ratio, 
+                random_state=GLOBAL_SEED
             )
     else:
-        val_indices = temp_indices
-        test_indices = np.array([], dtype=int)
+        auto_val_indices = temp_indices
+        auto_test_indices = np.array([], dtype=int)
+
+    # --- 3. 合并并确保 DTYPE ---
+    forced_train_indices = np.array(list(forced_train_indices_set), dtype=int)
+    forced_val_indices = np.array(list(forced_val_indices_set), dtype=int)
+    forced_test_indices = np.array(list(forced_test_indices_set), dtype=int)
+
+    auto_train_indices = auto_train_indices.astype(int)
+    auto_val_indices = auto_val_indices.astype(int)
+    auto_test_indices = auto_test_indices.astype(int)
+    
+    final_train_indices = np.unique(np.concatenate([forced_train_indices, auto_train_indices]))
+    final_val_indices = np.unique(np.concatenate([forced_val_indices, auto_val_indices]))
+    final_test_indices = np.unique(np.concatenate([forced_test_indices, auto_test_indices]))
+    
+    # --- 4. 完整性检查 ---
+    assert len(set(final_train_indices) & set(final_val_indices)) == 0, "严重错误: 训练集和验证集存在交集!"
+    assert len(set(final_train_indices) & set(final_test_indices)) == 0, "严重错误: 训练集和测试集存在交集!"
+    assert len(set(final_val_indices) & set(final_test_indices)) == 0, "严重错误: 验证集和测试集存在交集!"
         
-    return train_indices, val_indices, test_indices
-
-
+    # --- 5. 准备摘要字典 ---
+    split_summary = {
+        "total_cases_in_dataset": len(dataset),
+        "forced_train_found": forced_counts['train'],
+        "forced_valid_found": forced_counts['valid'],
+        "forced_test_found": forced_counts['test'],
+        "forced_exclude_found": forced_counts['exclude'],
+        "remaining_for_auto_split": len(remaining_indices_for_split),
+        "final_train_count": len(final_train_indices),
+        "final_valid_count": len(final_val_indices),
+        "final_test_count": len(final_test_indices)
+    }
+        
+    return final_train_indices, final_val_indices, final_test_indices, split_summary
 if __name__ == '__main__':
     start_time = time.time()
     
     dataset = CrashDataset(input_file='./data/data_input.npz', label_file='./data/data_labels.npz')
-    print(f"\n原始数据加载完成, 耗时: {time.time() - start_time:.2f}s")
+    # print(f"\n原始数据加载完成, 耗时: {time.time() - start_time:.2f}s")
 
-    train_indices, val_indices, test_indices = split_data(dataset, train_ratio=0.85, val_ratio=0.14, test_ratio=0.01)
+    #####
+    exclude_case_ids = pd.read_excel(r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution\Injury_labels_1023.xlsx')['case_id'].tolist()
+    #####
+
+    special_assignments = {
+        'train': [],   # 强制放入训练集的 case_id 列表
+        'valid': [],   # 强制放入验证集的 case_id 列表
+        'test': [],    # 强制放入测试集的 case_id 列表
+        'exclude': []  # 强制排除的 case_id 列表
+    }
+    # print(f"应用特殊分配规则: {special_assignments}")
+
+    # --- 修改: 捕获 split_summary 返回值 ---
+    train_indices, val_indices, test_indices, split_summary = split_data(
+        dataset, 
+        train_ratio=0.85, 
+        val_ratio=0.14, 
+        test_ratio=0.01,
+        special_case_assignments=special_assignments # 传入新参数
+    )
+    # --- 结束修改 ---
     
     processor = DataProcessor(top_k_waveform=50)
+    
+    # *** 关键修正：检查训练集是否为空 ***
+    if len(train_indices) == 0:
+        raise ValueError("错误：根据划分规则，训练集为空。无法拟合 preprocessor。")
+        
     processor.fit(train_indices, dataset)
     
     processor.print_fit_summary()
@@ -272,14 +389,31 @@ if __name__ == '__main__':
     torch.save(test_dataset, './data/test_dataset.pt')
     print("\n处理后的训练、验证和测试数据集已保存。")
 
-    print(f"\n数据集划分大小:")
-    print(f"  - 总计: {len(dataset)}")
-    print(f"  - 训练集: {len(train_dataset)}")
-    print(f"  - 验证集: {len(val_dataset)}")
-    print(f"  - 测试集: {len(test_dataset)}")
+    # --- 新增: 打印详细的划分摘要 ---
+    print(f"\n--- 数据集划分摘要 ---")
+    print(f"  - 数据集总案例数: {split_summary['total_cases_in_dataset']}")
+    print(f"  - 强制排除 (Exclude): {split_summary['forced_exclude_found']} (已找到并排除)")
+    print(f"  - 强制分配 (Train): {split_summary['forced_train_found']} (已找到)")
+    print(f"  - 强制分配 (Valid): {split_summary['forced_valid_found']} (已找到)")
+    print(f"  - 强制分配 (Test): {split_summary['forced_test_found']} (已找到)")
+    print(f"  - 剩余自动划分: {split_summary['remaining_for_auto_split']}")
+    print(f"  ---------------------")
+    print(f"  - 最终训练集大小: {split_summary['final_train_count']} (强制 + 自动)")
+    print(f"  - 最终验证集大小: {split_summary['final_valid_count']} (强制 + 自动)")
+    print(f"  - 最终测试集大小: {split_summary['final_test_count']} (强制 + 自动)")
+    total_assigned = split_summary['final_train_count'] + split_summary['final_valid_count'] + split_summary['final_test_count']
+    print(f"  - (总计已分配: {total_assigned})")
+    # 校验总数
+    total_check = total_assigned + split_summary['forced_exclude_found']
+    print(f"  - (总计 = 已分配 + 排除: {total_check})")
+    if total_check != split_summary['total_cases_in_dataset']:
+         print(f"  *** 警告: 总数 {total_check} 与数据集案例数 {split_summary['total_cases_in_dataset']} 不匹配! ***")
+    print(f"-----------------------\n")
+    # --- 结束新增 ---
 
     def get_label_distribution(subset):
-        if not subset.indices.any(): return "空"
+        # 修正：检查 subset.indices 是否为空
+        if len(subset.indices) == 0: return "空"
         labels = [subset.dataset.mais[i] for i in subset.indices]
         unique, counts = np.unique(labels, return_counts=True)
         return dict(zip(unique, counts))
@@ -289,16 +423,25 @@ if __name__ == '__main__':
     print(f"  - 验证集: {get_label_distribution(val_dataset)}")
     print(f"  - 测试集: {get_label_distribution(test_dataset)}")
     
+    # (原逻辑)
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=0)
     print("\nTesting DataLoader...")
-    batch_start_time = time.time()
-    for i, batch in enumerate(train_loader):
-        (x_acc, x_att_continuous, x_att_discrete, 
-         y_HIC, y_Dmax, y_Nij, 
-         ais_head, ais_chest, ais_neck, mais) = batch
-        
-        print("x_acc shape:", x_acc.shape)
-        print("y_HIC shape:", y_HIC.shape)
-        print("MAIS shape:", mais.shape)
-        break
-    print(f"batch loading time: {time.time() - batch_start_time:.4f}s")
+    
+    # 修正：检查训练集是否为空
+    if len(train_dataset) > 0:
+        try:
+            batch_start_time = time.time()
+            for i, batch in enumerate(train_loader):
+                (x_acc, x_att_continuous, x_att_discrete, 
+                 y_HIC, y_Dmax, y_Nij, 
+                 ais_head, ais_chest, ais_neck, mais) = batch
+                
+                print("x_acc shape:", x_acc.shape)
+                print("y_HIC shape:", y_HIC.shape)
+                print("MAIS shape:", mais.shape)
+                break
+            print(f"batch loading time: {time.time() - batch_start_time:.4f}s")
+        except Exception as e:
+            print(f"DataLoader 测试失败: {e}")
+    else:
+        print("训练集为空，跳过 DataLoader 测试。")

@@ -280,9 +280,9 @@ class TeacherModel(nn.Module):
                 tcn_channels_list = [64, 128] + [256] * (num_blocks_of_tcn - 2)
             elif num_blocks_of_tcn >= 5:
                 tcn_channels_list = [64, 128] + [256] * (num_blocks_of_tcn - 3) + [512]
-        else:
-            if len(tcn_channels_list) != num_blocks_of_tcn:
-                raise ValueError("tcn_channels_list 长度必须等于 num_blocks_of_tcn")
+        # else:
+        #     if len(tcn_channels_list) != num_blocks_of_tcn:
+        #         raise ValueError("tcn_channels_list 长度必须等于 num_blocks_of_tcn")
             
         #########################################
         self.tcn = TemporalConvNet(

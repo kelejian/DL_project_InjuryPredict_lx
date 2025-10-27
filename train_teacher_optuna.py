@@ -82,39 +82,54 @@ def run_one_epoch(model, loader, criterion, device, optimizer=None):
 def objective(trial):
     """定义Optuna的多目标优化函数"""
     # --- 超参数搜索空间 (与之前保持一致) ---
-    learning_rate = trial.suggest_float("learning_rate", 0.016, 0.027, log=True)
-    weight_decay = trial.suggest_float("weight_decay", 1e-4, 2e-3, log=True)
-    weight_factor_classify = trial.suggest_float("weight_factor_classify", 1.1, 1.3, step=0.02)
-    weight_factor_sample = trial.suggest_float("weight_factor_sample", 0, 0.32, step=0.02)
+    Batch_size = trial.suggest_int("Batch_size", 384, 768, step=128)
+    learning_rate = trial.suggest_float("learning_rate", 0.012, 0.04, log=True)
+    # eta_min = trial.suggest_float("eta_min", 1e-8, 1e-3, log=True)
+    eta_min = 1e-7
+    weight_decay = trial.suggest_float("weight_decay", 2e-5, 2e-3, log=True)
+    # weight_decay = 5e-4
+    weight_factor_classify = trial.suggest_float("weight_factor_classify", 1.0, 2.0, step=0.1)
+    # weight_factor_classify = 1.2
+    weight_factor_sample = trial.suggest_float("weight_factor_sample", 0, 1.0, step=0.1)
+    # weight_factor_sample = 0.1
     
-    # Ksize_init = trial.suggest_int("Ksize_init", 4, 10, step=2)
-    Ksize_init = 8
+    Ksize_init = trial.suggest_int("Ksize_init", 4, 10, step=2)
+    # Ksize_init = 8
     # Ksize_mid = trial.suggest_categorical("Ksize_mid", [3, 5])
-    Ksize_mid = trial.suggest_int("Ksize_mid", 5, 7, step=2)
+    Ksize_mid = trial.suggest_int("Ksize_mid", 3, 7, step=2)
+    # Ksize_mid = 5
     # num_blocks_of_tcn = trial.suggest_int("num_blocks_of_tcn", 2, 5)
-    num_blocks_of_tcn = 3
+    # num_blocks_of_tcn = 3
+    tcn_channels_list = trial.suggest_categorical("tcn_channels_list", [
+        [64, 128, 256], [64, 96, 128, 160]
+    ])
     num_layers_of_mlpE = trial.suggest_int("num_layers_of_mlpE", 3, 4)
+    # num_layers_of_mlpE = 3
     num_layers_of_mlpD = trial.suggest_int("num_layers_of_mlpD", 3, 4)
-    # mlpE_hidden = trial.suggest_int("mlpE_hidden", 128, 256, step=32)
-    mlpE_hidden = 224
-    # mlpD_hidden = trial.suggest_int("mlpD_hidden", 128, 160, step=32)
-    mlpD_hidden = 160
-    encoder_output_dim = trial.suggest_int("encoder_output_dim", 64, 96, step=16)
+    # num_layers_of_mlpD = 3
+    mlpE_hidden = trial.suggest_int("mlpE_hidden", 160, 256, step=32)
+    # mlpE_hidden = 224
+    mlpD_hidden = trial.suggest_int("mlpD_hidden", 96, 192, step=32)
+    # mlpD_hidden = 160
+    # encoder_output_dim = trial.suggest_int("encoder_output_dim", 64, 96, step=16)
+    encoder_output_dim = 96
     # decoder_output_dim = trial.suggest_categorical("decoder_output_dim", [16, 32, 48])
     decoder_output_dim = trial.suggest_int("decoder_output_dim", 16, 32, step=16)
+    # decoder_output_dim = 16
     # dropout_MLP = trial.suggest_float("dropout_MLP", 0.1, 0.45, step=0.05)
-    dropout_MLP = trial.suggest_float("dropout_MLP", 0.1, 0.25, step=0.01)
-    # dropout_TCN = trial.suggest_float("dropout_TCN", 0.05, 0.3, step=0.05)
-    dropout_TCN = 0.15
-    loss_weights_head = trial.suggest_float("loss_weights_head", 0.20, 0.3, step=0.02)
-    loss_weights_neck = trial.suggest_float("loss_weights_neck", 20, 40, step=2)
+    dropout_MLP = trial.suggest_float("dropout_MLP", 0.05, 0.3, step=0.05)
+    # dropout_MLP = 0.15
+    dropout_TCN = trial.suggest_float("dropout_TCN", 0.05, 0.25, step=0.05)
+    # dropout_TCN = 0.15
+    # loss_weights_head = trial.suggest_float("loss_weights_head", 0.20, 0.3, step=0.02)
+    loss_weights_head = trial.suggest_float("loss_weights_head", 0.15, 0.3, step=0.05)
+    loss_weights_neck = trial.suggest_float("loss_weights_neck", 15, 40, step=5)
 
     # 固定参数
-    Epochs = 300 # Optuna中通常使用较少的Epochs进行快速评估
-    Batch_size = 512
+    Epochs = 260 # Optuna中通常使用较少的Epochs进行快速评估
     base_loss = "mae"
     loss_weights = (loss_weights_head, 1.0, loss_weights_neck)
-    eta_min = 1e-6
+
     
     # 加载数据集
     train_dataset = torch.load("./data/train_dataset.pt")
@@ -128,7 +143,8 @@ def objective(trial):
     model = models.TeacherModel(
         num_classes_of_discrete=train_dataset.dataset.num_classes_of_discrete,
         Ksize_init=Ksize_init, Ksize_mid=Ksize_mid,
-        num_blocks_of_tcn=num_blocks_of_tcn,
+        # num_blocks_of_tcn=num_blocks_of_tcn,
+        tcn_channels_list=tcn_channels_list,
         num_layers_of_mlpE=num_layers_of_mlpE, num_layers_of_mlpD=num_layers_of_mlpD,
         mlpE_hidden=mlpE_hidden, mlpD_hidden=mlpD_hidden,
         encoder_output_dim=encoder_output_dim, decoder_output_dim=decoder_output_dim,
@@ -166,7 +182,7 @@ def objective(trial):
 if __name__ == "__main__":
 
     study_file = "./runs/optuna_study_teacher_multiobj_acc.pkl"
-    study_name = "teacher_model_multiobj_acc_optimization_1016_2"
+    study_name = "teacher_model_multiobj_acc_optimization_1023_3"
     db_path = "sqlite:///./runs/optuna_study.db"
     storage = RDBStorage(db_path)
 
@@ -184,6 +200,8 @@ if __name__ == "__main__":
             directions=["maximize", "maximize", "maximize", "maximize"] # 对应 MAIS, Head, Chest, Neck 准确率
         )
 
+    print(f'请在命令行运行optuna-dashboard sqlite:///runs/optuna_study.db 来监控优化过程。')
+
     # 定义回调函数，定期保存研究结果
     def save_study_callback(study, trial):
         if trial.number % 5 == 0:
@@ -192,7 +210,7 @@ if __name__ == "__main__":
 
     # 运行优化
     try:
-        study.optimize(objective, n_trials=200, callbacks=[save_study_callback])
+        study.optimize(objective, n_trials=1000, callbacks=[save_study_callback])
     except KeyboardInterrupt:
         print("用户中断了优化。")
     finally:

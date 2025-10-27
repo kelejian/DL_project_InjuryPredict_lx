@@ -179,10 +179,17 @@ def generate_report_section(title, reg_metrics, cls_metrics_6c, cls_metrics_3c=N
     return section
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate a trained injury prediction model")
-    parser.add_argument("--run_dir", '-r', type=str, required=True, help="Directory of the training run to evaluate.")
-    parser.add_argument("--weight_file", '-w', type=str, default="best_mais_accu.pth", help="Name of the model weight file.")
-    args = parser.parse_args()
+    # parser = argparse.ArgumentParser(description="Evaluate a trained injury prediction model")
+    # parser.add_argument("--run_dir", '-r', type=str, required=True, help="Directory of the training run to evaluate.")
+    # parser.add_argument("--weight_file", '-w', type=str, default="best_mais_accu.pth", help="Name of the model weight file.")
+    # args = parser.parse_args()
+
+    from dataclasses import dataclass
+    @dataclass
+    class args:
+        run_dir: str = r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\DL_project_InjuryPredict\runs\TeacherModel_10261509'
+        weight_file: str = 'final_model.pth'
+
 
     # --- 1. 加载模型和数据 ---
     with open(os.path.join(args.run_dir, "TrainingRecord.json"), "r") as f:
@@ -259,6 +266,7 @@ if __name__ == "__main__":
 - **Weight File**: `{args.weight_file}`
 - **Model Type**: {"Teacher" if "teacher" in args.run_dir.lower() else "Student"}
 - **Total Parameters**: {total_params}
+- **Trainset size**: {len(train_dataset)}
 - **Testset size**: {len(test_dataset)}
 ```
 

@@ -1,5 +1,5 @@
 # 全局配置文件
-GLOBAL_SEED = 20252025
+GLOBAL_SEED = 123
 
 def set_random_seed(seed=GLOBAL_SEED):
     """设置全局随机种子"""
