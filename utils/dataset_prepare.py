@@ -357,8 +357,8 @@ if __name__ == '__main__':
     # --- 修改: 捕获 split_summary 返回值 ---
     train_indices, val_indices, test_indices, split_summary = split_data(
         dataset, 
-        train_ratio=0.85, 
-        val_ratio=0.14, 
+        train_ratio=0.8, 
+        val_ratio=0.19, 
         test_ratio=0.01,
         special_case_assignments=special_assignments # 传入新参数
     )
