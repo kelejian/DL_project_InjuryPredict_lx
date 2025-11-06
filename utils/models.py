@@ -337,47 +337,27 @@ class TeacherModel(nn.Module):
 
         self.bn2 = nn.BatchNorm1d(decoder_output_dim) # 归一化解码器输出特征
         self.leaky_relu2 = nn.LeakyReLU()
-        self.fc = nn.Linear(decoder_output_dim, 3)  # 输出 HIC, Dmax, Nij 三个预测值
+        # self.fc = nn.Linear(decoder_output_dim, 3)  # 输出 HIC, Dmax, Nij 三个预测值
+        # 三个独立的输出头，每个输出头有两个线性层，中间有bn+leakyrelu
+        self.HIC_head = nn.Sequential(
+            nn.Linear(decoder_output_dim, decoder_output_dim),
+            nn.BatchNorm1d(decoder_output_dim),
+            nn.LeakyReLU(),
+            nn.Linear(decoder_output_dim, 1)
+        )
+        self.Dmax_head = nn.Sequential(
+            nn.Linear(decoder_output_dim, decoder_output_dim),
+            nn.BatchNorm1d(decoder_output_dim),
+            nn.LeakyReLU(),
+            nn.Linear(decoder_output_dim, 1)
+        )
+        self.Nij_head = nn.Sequential(
+            nn.Linear(decoder_output_dim, decoder_output_dim),
+            nn.BatchNorm1d(decoder_output_dim),
+            nn.LeakyReLU(),
+            nn.Linear(decoder_output_dim, 1)
+        )
         
-        # 初始化所有模型参数
-        self._initialize_weights()
-
-    def _initialize_weights(self):
-        """初始化所有模型参数"""
-        # TCN 初始化
-        for m in self.tcn.modules():
-            if isinstance(m, nn.Conv1d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-            elif isinstance(m, nn.BatchNorm1d):
-                nn.init.constant_(m.weight, 1)
-                nn.init.constant_(m.bias, 0)
-
-        # 离散特征嵌入层初始化
-        for embedding in self.discrete_embedding.embedding_layers:
-            nn.init.xavier_uniform_(embedding.weight)
-
-        # MLP编码器和解码器初始化
-        for mlp in [self.mlp_encoder, self.mlp_decoder]:
-            for m in mlp.modules():
-                if isinstance(m, nn.Linear):
-                    nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')
-                    if m.bias is not None:
-                        nn.init.constant_(m.bias, 0)
-                elif isinstance(m, nn.BatchNorm1d):
-                    nn.init.constant_(m.weight, 1)
-                    nn.init.constant_(m.bias, 0)
-
-        # BatchNorm层初始化
-        for bn in [self.bn1, self.bn2]:
-            nn.init.constant_(bn.weight, 1)
-            nn.init.constant_(bn.bias, 0)
-
-        # 最终预测层初始化
-        nn.init.kaiming_normal_(self.fc.weight, mode='fan_in', nonlinearity='relu')
-        nn.init.constant_(self.fc.bias, 0)
-
     def forward(self, x_acc, x_att_continuous, x_att_discrete):
         """
         参数:
@@ -414,7 +394,11 @@ class TeacherModel(nn.Module):
         # 6. 预测 HIC, Dmax, Nij 值
         regression_input = self.bn2(decoder_output)
         regression_input = self.leaky_relu2(regression_input)
-        predictions = self.fc(regression_input) # (B, 3)
+        # predictions = self.fc(regression_input) # (B, 3)
+        HIC_pred = self.HIC_head(regression_input)  # (B, 1)
+        Dmax_pred = self.Dmax_head(regression_input)  # (B, 1)
+        Nij_pred = self.Nij_head(regression_input)  # (B, 1)
+        predictions = torch.cat([HIC_pred, Dmax_pred, Nij_pred], dim=1)  # (B, 3)
 
         return predictions, encoder_output, decoder_output
 
@@ -482,36 +466,6 @@ class StudentModel(nn.Module):
         self.leaky_relu2 = nn.LeakyReLU()
         self.fc = nn.Linear(decoder_output_dim, 3)  # 输出 HIC, Dmax, Nij 预测值
         
-        self._initialize_weights()
-        
-    def _initialize_weights(self):
-        """
-        初始化所有模型参数。
-        """
-        # 离散特征嵌入层初始化
-        for embedding in self.discrete_embedding.embedding_layers:
-            nn.init.xavier_uniform_(embedding.weight)  # 使用 Xavier 初始化
-
-        # MLP 编码器和解码器初始化
-        for mlp in [self.mlp_encoder, self.mlp_decoder]:
-            for m in mlp.modules():
-                if isinstance(m, nn.Linear):
-                    nn.init.kaiming_normal_(m.weight, mode='fan_in', nonlinearity='relu')  # 使用 He 初始化
-                    if m.bias is not None:
-                        nn.init.constant_(m.bias, 0)  # 偏置初始化为 0
-                elif isinstance(m, nn.BatchNorm1d):
-                    nn.init.constant_(m.weight, 1)  # BatchNorm 的 weight 初始化为 1
-                    nn.init.constant_(m.bias, 0)  # BatchNorm 的 bias 初始化为 0
-
-        # BatchNorm 层初始化
-        for bn in [self.bn1, self.bn2]:
-            nn.init.constant_(bn.weight, 1)  # BatchNorm 的 weight 初始化为 1
-            nn.init.constant_(bn.bias, 0)  # BatchNorm 的 bias 初始化为 0
-
-        # 最终预测层初始化
-        nn.init.kaiming_normal_(self.fc.weight, mode='fan_in', nonlinearity='relu')  # 使用 He 初始化
-        nn.init.constant_(self.fc.bias, 0)  # 偏置初始化为 0
-
     def forward(self, x_att_continuous, x_att_discrete):
         """
         参数:

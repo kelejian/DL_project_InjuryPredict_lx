@@ -103,32 +103,32 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 优化与训练相关
-    Epochs = 500
+    Epochs = 350
     Batch_size = 512
-    Learning_rate = 0.02
-    Learning_rate_min = 5e-7
-    weight_decay = 6e-4
+    Learning_rate = 0.025
+    Learning_rate_min = 1e-6
+    weight_decay = 5e-4
     Patience = 1000 # 早停轮数
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.15
-    weight_factor_sample = 0.3
-    loss_weights = (0.25, 1.0, 25.0) # HIC, Dmax, Nij 各自损失的权重
+    weight_factor_classify = 1.3
+    weight_factor_sample = 0.5
+    loss_weights = (0.3, 1.0, 25.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     Ksize_init = 8
-    Ksize_mid = 5
+    Ksize_mid = 3
     num_blocks_of_tcn = 4
-    tcn_channels_list = [64, 96, 128, 160]  # 每个 TCN 块的输出通道数
-    num_layers_of_mlpE = 4
+    tcn_channels_list = [64, 96, 128, 128]  # 每个 TCN 块的输出通道数
+    num_layers_of_mlpE = 3
     num_layers_of_mlpD = 3
     mlpE_hidden = 192
     mlpD_hidden = 160
-    encoder_output_dim = 96
-    decoder_output_dim = 16
-    dropout_MLP = 0.1
-    dropout_TCN = 0.15
+    encoder_output_dim = 128
+    decoder_output_dim = 96
+    dropout_MLP = 0.2
+    dropout_TCN = 0.1
     use_channel_attention = True  # 是否使用通道注意力机制
     fixed_channel_weight = [0.7, 0.3, 0]  # 固定的通道注意力权重(None表示自适应学习)
     ############################################################################################
@@ -217,10 +217,22 @@ if __name__ == "__main__":
             dropout_MLP=dropout_MLP, dropout_TCN=dropout_TCN,
             use_channel_attention=use_channel_attention, fixed_channel_weight=fixed_channel_weight
         ).to(device)
+
+        # 在第一折打印: 模型各层参数量和总量, 我想知道模型参数量集中在哪里
+        if fold == 0:
+            print("\n模型结构:")
+            print(model)
+            print("\n模型各层参数量:")
+            for name, param in model.named_parameters():
+                print(f"  {name}: {param.numel()} parameters")
+            print(f"\n模型参数量统计:")
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print(f"模型总参数量: {total_params}, 可训练参数量: {trainable_params}")
+            
         
         criterion = weighted_loss(base_loss, weight_factor_classify, weight_factor_sample, loss_weights)
         optimizer = optim.AdamW(model.parameters(), lr=Learning_rate, weight_decay=weight_decay)
-        # 注意：T_max 应设为 Epochs，因为每折都训练完整的 Epochs (或提前停止)
         scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=Epochs, eta_min=Learning_rate_min)
 
         # --- 6.5 初始化当前 Fold 的跟踪变量 ---
@@ -344,7 +356,6 @@ if __name__ == "__main__":
     print("="*60)
     
     # --- 8. 保存 K-Fold 总体结果 ---
-    # (可以将超参数和平均结果保存到主运行目录的 JSON 文件中)
     
     # --- 类型转换函数 (来自 train_teacher.py) ---
     def convert_numpy_types(obj):
@@ -364,6 +375,11 @@ if __name__ == "__main__":
             return obj
             
     kfold_results = {
+        "model_type": "TeacherModel",
+        "model_params": {
+            "total_params": total_params,
+            "trainable_params": trainable_params
+        },
         "dataset_info": {
             "total_samples_for_kfold": len(combined_indices),
             "k_value": K
@@ -400,7 +416,8 @@ if __name__ == "__main__":
             "mean_val_nij_mae": mean_nij_mae, "std_val_nij_mae": std_nij_mae,
             "mean_best_epoch": np.mean(all_folds_best_epochs)
         },
-        "per_fold_best_metrics": convert_numpy_types(all_folds_best_metrics) # 记录每折的具体最佳指标
+        "per_fold_best_metrics": convert_numpy_types(all_folds_best_metrics), # 记录每折的具体最佳指标
+        "best_epochs_per_fold": all_folds_best_epochs
     }
 
     # 转换所有 NumPy 类型以确保 JSON 兼容性
