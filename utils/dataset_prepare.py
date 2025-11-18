@@ -343,7 +343,7 @@ if __name__ == '__main__':
     # print(f"\n原始数据加载完成, 耗时: {time.time() - start_time:.2f}s")
 
     #####
-    exclude_case_ids = pd.read_excel(r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution\Injury_labels_1023.xlsx')['case_id'].tolist()
+    # exclude_case_ids = pd.read_excel(r'E:\WPS Office\1628575652\WPS企业云盘\清华大学\我的企业文档\课题组相关\理想项目\仿真数据库相关\distribution\Injury_labels_1023.xlsx')['case_id'].tolist()
     #####
 
     special_assignments = {
@@ -354,7 +354,7 @@ if __name__ == '__main__':
     }
     # print(f"应用特殊分配规则: {special_assignments}")
 
-    # --- 修改: 捕获 split_summary 返回值 ---
+    # ---  捕获 split_summary 返回值 ---
     train_indices, val_indices, test_indices, split_summary = split_data(
         dataset, 
         train_ratio=0.8, 
@@ -362,7 +362,6 @@ if __name__ == '__main__':
         test_ratio=0.01,
         special_case_assignments=special_assignments # 传入新参数
     )
-    # --- 结束修改 ---
     
     processor = DataProcessor(top_k_waveform=50)
     

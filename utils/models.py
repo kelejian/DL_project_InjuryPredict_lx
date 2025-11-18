@@ -115,25 +115,24 @@ class ChannelAttention(nn.Module):
         return None
 
 class TemporalConvNet(nn.Module):
-    def __init__(self, in_channels, tcn_channels_list, Ksize_init=6, Ksize_mid=3, dropout=0.1, hidden=128, use_channel_attention=True, fixed_channel_weight=None):
+    def __init__(self, in_channels, tcn_channels_list, Ksize_init=6, Ksize_mid=3, 
+                 dropout=0.1, hidden=128, use_channel_attention=True, fixed_channel_weight=None,
+                 use_attention_pooling=True):
         """
         教师模型一部分, 负责提取X,Y加速度曲线特征(x_acc), 作为encoder一部分
         Args:
-            in_channels (int): 输入通道数。
-            tcn_channels_list (list): 每个 TemporalBlock 的输出通道数。
-            Ksize_init (int): 初始卷积核大小。默认为 6。
-            Ksize_mid (int): 中间卷积核大小。默认为 3。
-            dropout (float): 默认为 0.1。
-            hidden (int): 最终输出的特征维度。默认为 128。
-            use_channel_attention (bool): 是否使用通道注意力机制。默认为 True。
+            use_attention_pooling (bool): 是否使用注意力池化替代全局平均池化。
         """
         super(TemporalConvNet, self).__init__()
 
-        # 添加通道注意力
+        self.use_attention_pooling = use_attention_pooling
+
+        # --- 1. 通道注意力 ---
         self.use_channel_attention = use_channel_attention
         if use_channel_attention:
             self.channel_attention = ChannelAttention(in_channels, fixed_weight=fixed_channel_weight)
 
+        # --- 2. TCN 模块定义 ---
         kernel_sizes = [Ksize_init] + [Ksize_mid] * (len(tcn_channels_list)-1)
 
         # 确保参数列表长度一致
@@ -170,9 +169,45 @@ class TemporalConvNet(nn.Module):
 
         self.temporal_blocks = nn.Sequential(*layers)
 
-        # 全局平均池化 + 全连接层
-        self.global_avg_pool = nn.AdaptiveAvgPool1d(1)  # 将时间维度降为 1
-        self.fc = nn.Linear(tcn_channels_list[-1], hidden)  # 输出特征维度为 hidden
+        # --- 3. 池化层修改 ---
+        
+        # C_out 即 TCN 的最终输出通道数
+        C_out = tcn_channels_list[-1] 
+
+        if self.use_attention_pooling:
+            # --- 方案3: 注意力池化 + 可学习 PE ---
+            
+            # (a) 定义TCN输出的时间步长度 (L_feat)
+            tcn_output_length = 150 // 2
+            
+            # (b) 可学习的位置编码 (Learned PE)
+            self.pos_embedding = nn.Embedding(
+                num_embeddings=tcn_output_length, 
+                embedding_dim=C_out
+            )
+            # 注册 position_ids 缓冲区
+            self.register_buffer(
+                'position_ids', 
+                torch.arange(tcn_output_length).expand((1, -1))
+            )
+            self.pe_dropout = nn.Dropout(dropout) # 添加 Dropout
+
+            # (c) 注意力权重计算网络 (attention_mlp)
+            C_hidden_attn = C_out // 2 
+            self.attention_mlp = nn.Sequential(
+                nn.Conv1d(in_channels=C_out, out_channels=C_hidden_attn, kernel_size=1, bias=False),
+                nn.BatchNorm1d(C_hidden_attn),
+                nn.ReLU(inplace=True),
+                nn.Dropout(dropout), # 添加 Dropout
+                nn.Conv1d(in_channels=C_hidden_attn, out_channels=1, kernel_size=1, bias=True)
+            )
+        else:
+            # --- 原始 GAP 方案 ---
+            self.global_avg_pool = nn.AdaptiveAvgPool1d(1)
+
+        # --- 4. 最终全连接层 ---
+        # 无论哪种池化, 输出维度都是 (B, C_out), fc层保持不变
+        self.fc = nn.Linear(C_out, hidden)
 
     def forward(self, x):
         """
@@ -182,20 +217,62 @@ class TemporalConvNet(nn.Module):
         Returns:
             torch.Tensor: 输出张量,形状为 (B, hidden)
         """
-        # 首先应用通道注意力
+        # 1. 通道注意力
         if self.use_channel_attention:
-            x = self.channel_attention(x)  # 对X、Y、Z方向自适应加权
-        # 初始卷积层（下采样）
-        x = self.initial_conv(x)  # 输出形状: (B, tcn_channels_list[0], L/2)
-        # TemporalBlock 堆叠
-        x = self.temporal_blocks(x)  # 输出形状: (B, tcn_channels_list[-1], L/2)
-        # 全局平均池化
-        x = self.global_avg_pool(x)  # 输出形状: (B, tcn_channels_list[-1], 1)
-        # 全连接层
-        x = x.squeeze(-1)  # 去掉时间维度,形状: (B, tcn_channels_list[-1])
-        x = self.fc(x)  # 输出形状: (B, hidden)
-        return x
+            x = self.channel_attention(x)  # (B, C, L)
+        
+        # 2. 初始卷积
+        x = self.initial_conv(x)  # (B, C_0, L/2)
+        
+        # 3. TCN 堆叠
+        x = self.temporal_blocks(x)  # (B, C_out, L_feat), L_feat=75
 
+        # 4. 池化 (修改)
+        if self.use_attention_pooling:
+            # --- 方案3: 注意力池化 + 可学习 PE (含 Dropout) ---
+            
+            # (a) 获取当前特征长度 L_feat (应为 75)
+            L_feat = x.size(2)
+            
+            # (b) 获取位置编码 (B, L_feat, C_out)
+            pos_ids = self.position_ids[:, :L_feat].to(x.device)
+            pos_embeds = self.pos_embedding(pos_ids)
+            
+            # *** 应用 PE Dropout ***
+            # P_learn_dropout = P_learn * M_pe
+            pos_embeds = self.pe_dropout(pos_embeds)
+            
+            # (c) 转换维度: (B, L_feat, C_out) -> (B, C_out, L_feat)
+            pos_embeds = pos_embeds.permute(0, 2, 1)
+
+            # (d) 注入 PE
+            # F_pos = F + P_learn_dropout
+            x_pos = x + pos_embeds # (B, C_out, L_feat)
+
+            # (e) 计算注意力分数 (B, C_out, L_feat) -> (B, 1, L_feat)
+            attention_scores = self.attention_mlp(x_pos)
+            
+            # (f) 归一化权重 (Softmax)
+            # A = Softmax(S)
+            attention_weights = torch.softmax(attention_scores, dim=2) 
+            
+            # (g) 加权求和 (用原始特征 x, 而非 x_pos)
+            # F_weighted = F * A
+            weighted_features = x * attention_weights
+            
+            # (h) 压缩维度 -> (B, C_out)
+            # v = sum(F_weighted)
+            x = torch.sum(weighted_features, dim=2)
+        
+        else:
+            # --- 原始 GAP 方案 ---
+            x = self.global_avg_pool(x)  # (B, C_out, 1)
+            x = x.squeeze(-1)           # (B, C_out)
+
+        # 5. 全连接层
+        x = self.fc(x)  # (B, C_out) -> (B, hidden)
+        
+        return x
 class DiscreteFeatureEmbedding(nn.Module):
     """
     对离散特征进行嵌入处理, 用于教师模型和学生模型的encoder

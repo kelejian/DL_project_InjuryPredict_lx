@@ -21,10 +21,12 @@ from torch import nn
 from torch.utils.data import DataLoader, Subset, ConcatDataset # 引入 Subset 和 ConcatDataset
 import torch.optim as optim
 import pandas as pd
-from sklearn.metrics import mean_absolute_error, root_mean_squared_error, accuracy_score
+from sklearn.metrics import mean_absolute_error, root_mean_squared_error, accuracy_score, confusion_matrix, r2_score
 from sklearn.model_selection import StratifiedKFold # 引入 StratifiedKFold
 from torch.utils.tensorboard import SummaryWriter
-
+import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
+from imblearn.metrics import geometric_mean_score, classification_report_imbalanced
 # --- 从 utils 导入必要的模块 ---
 # 确保此脚本与 utils 文件夹在同一项目结构下
 from utils import models
@@ -35,7 +37,6 @@ from utils.set_random_seed import GLOBAL_SEED, set_random_seed # 导入 GLOBAL_S
 
 set_random_seed() # 设置全局随机种子
 
-# --- run_one_epoch 函数 (与 train_teacher.py 完全相同) ---
 def run_one_epoch(model, loader, criterion, device, optimizer=None):
     """
     执行一个完整的训练或验证周期。
@@ -96,6 +97,132 @@ def run_one_epoch(model, loader, criterion, device, optimizer=None):
     }
     return metrics
 
+def evaluate_fold(model, loader, device):
+    """
+    在验证集上运行模型并收集所有预测和真实标签。
+    (此函数基于 eval_model.py 中的 test 函数)
+
+    返回:
+        preds (np.ndarray): 模型对 [HIC, Dmax, Nij] 的预测值, 形状 (N, 3)。
+        trues (dict): 包含所有真实标签的字典。
+    """
+    model.eval()
+    all_preds = []
+    all_trues_regression = []
+    all_true_ais_head, all_true_ais_chest, all_true_ais_neck, all_true_mais = [], [], [], []
+
+    with torch.no_grad():
+        for batch in loader:
+            (batch_x_acc, batch_x_att_continuous, batch_x_att_discrete,
+             batch_y_HIC, batch_y_Dmax, batch_y_Nij,
+             batch_ais_head, batch_ais_chest, batch_ais_neck, batch_y_MAIS) = [d.to(device) for d in batch]
+            
+            # 前向传播
+            batch_pred, _, _ = model(batch_x_acc, batch_x_att_continuous, batch_x_att_discrete)
+
+            # 收集回归和分类的标签
+            batch_y_true = torch.stack([batch_y_HIC, batch_y_Dmax, batch_y_Nij], dim=1)
+            all_preds.append(batch_pred.cpu().numpy())
+            all_trues_regression.append(batch_y_true.cpu().numpy())
+            all_true_ais_head.append(batch_ais_head.cpu().numpy())
+            all_true_ais_chest.append(batch_ais_chest.cpu().numpy())
+            all_true_ais_neck.append(batch_ais_neck.cpu().numpy())
+            all_true_mais.append(batch_y_MAIS.cpu().numpy())
+    
+    preds = np.concatenate(all_preds)
+    trues = {
+        'regression': np.concatenate(all_trues_regression),
+        'ais_head': np.concatenate(all_true_ais_head),
+        'ais_chest': np.concatenate(all_true_ais_chest),
+        'ais_neck': np.concatenate(all_true_ais_neck),
+        'mais': np.concatenate(all_true_mais)
+    }
+    
+    return preds, trues
+
+def get_regression_metrics(y_true, y_pred):
+    """计算并返回一组回归指标 (同 eval_model.py)"""
+    return {
+        'mae': mean_absolute_error(y_true, y_pred),
+        'rmse': root_mean_squared_error(y_true, y_pred),
+        'r2': r2_score(y_true, y_pred)
+    }
+
+def get_classification_metrics(y_true, y_pred, labels):
+    """计算并返回一组分类指标 (同 eval_model.py)"""
+    # 检查缺失的类别
+    present_labels = set(np.unique(np.concatenate([y_true, y_pred])))
+    missing_labels = set(labels) - present_labels
+    
+    if missing_labels:
+        print(f"\n*Warning: Labels {missing_labels} are not present in the data for this fold\n")
+    
+    return {
+        'accuracy': accuracy_score(y_true, y_pred) * 100,
+        'g_mean': geometric_mean_score(y_true, y_pred, labels=labels, average='multiclass'), # 修正: KFold中可能样本少，指定average
+        'conf_matrix': confusion_matrix(y_true, y_pred, labels=labels),
+        'report': classification_report_imbalanced(
+            y_true, y_pred, labels=labels, digits=3, 
+            zero_division=0  # 处理除零情况
+        )
+    }
+
+def plot_scatter(y_true, y_pred, ais_true, title, xlabel, save_path):
+    """改进的散点图函数 (同 eval_model.py)"""
+    plt.figure(figsize=(8, 7))
+    colors = ['blue', 'green', 'yellow', 'orange', 'red', 'darkred']
+    
+    # 修正：确保 ais_true 中的值不会索引越界
+    ais_indices = np.clip(ais_true, 0, 5).astype(int)
+    ais_colors = [colors[i] for i in ais_indices]
+    
+    plt.scatter(y_true, y_pred, c=ais_colors, alpha=0.5, s=40)
+
+    legend_elements = [Patch(facecolor=colors[i], label=f'AIS {i}') for i in range(6) if i in np.unique(ais_true)]
+    
+    max_val = max(np.max(y_true), np.max(y_pred)) * 1.05
+    min_val = min(np.min(y_true), np.min(y_pred))
+    min_val = min(0, min_val * 1.05) # 确保从0或更低开始
+    
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', label="Ideal Line")
+    plt.xlabel(f"Ground Truth ({xlabel})", fontsize=16)
+    plt.ylabel(f"Predictions ({xlabel})", fontsize=16)
+    plt.title(f"Scatter Plot of Predictions vs Ground Truth\n({title})", fontsize=18)
+    plt.xlim(min_val, max_val)
+    plt.ylim(min_val, max_val)
+    
+    first_legend = plt.legend(handles=legend_elements, title='AIS Level', loc='upper left')
+    plt.gca().add_artist(first_legend)
+    plt.legend(loc='lower right')
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
+def plot_confusion_matrix(cm, labels, title, save_path):
+    """绘制并保存混淆矩阵图 (同 eval_model.py)"""
+    plt.figure(figsize=(8, 6))
+    plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+    plt.title(title, fontsize=16)
+    plt.colorbar()
+    tick_marks = np.arange(len(labels))
+    plt.xticks(tick_marks, labels, fontsize=12)
+    plt.yticks(tick_marks, labels, fontsize=12)
+    plt.xlabel('Predicted Label', fontsize=14)
+    plt.ylabel('True Label', fontsize=14)
+    
+    # 修正：处理 cm.max() 为 0 的情况
+    thresh = cm.max() / 2. if cm.max() > 0 else 0.5 
+    
+    for i, j in np.ndindex(cm.shape):
+        plt.text(j, i, format(cm[i, j], 'd'),
+                 horizontalalignment="center",
+                 color="white" if cm[i, j] > thresh else "black",
+                 fontsize=12)
+    plt.tight_layout()
+    plt.savefig(save_path)
+    plt.close()
+
 if __name__ == "__main__":
     
     # --- 1. 定义超参数 ---
@@ -103,34 +230,34 @@ if __name__ == "__main__":
     ############################################################################################
     # 定义所有可调超参数
     # 1. 优化与训练相关
-    Epochs = 350
+    Epochs = 450
     Batch_size = 512
-    Learning_rate = 0.025
+    Learning_rate = 0.02
     Learning_rate_min = 1e-6
-    weight_decay = 5e-4
+    weight_decay = 6e-4
     Patience = 1000 # 早停轮数
     
     # 2. 损失函数相关
     base_loss = "mae"
-    weight_factor_classify = 1.3
-    weight_factor_sample = 0.5
-    loss_weights = (0.3, 1.0, 25.0) # HIC, Dmax, Nij 各自损失的权重
+    weight_factor_classify = 1.1
+    weight_factor_sample = 0.2
+    loss_weights = (0.2, 1.0, 20.0) # HIC, Dmax, Nij 各自损失的权重
 
     # 3. 模型结构相关
     Ksize_init = 8
     Ksize_mid = 3
-    num_blocks_of_tcn = 4
-    tcn_channels_list = [64, 96, 128, 128]  # 每个 TCN 块的输出通道数
+    num_blocks_of_tcn = 3
+    tcn_channels_list = [64, 128, 160]  # 每个 TCN 块的输出通道数
     num_layers_of_mlpE = 3
     num_layers_of_mlpD = 3
     mlpE_hidden = 192
     mlpD_hidden = 160
     encoder_output_dim = 128
     decoder_output_dim = 96
-    dropout_MLP = 0.2
-    dropout_TCN = 0.1
+    dropout_MLP = 0.35
+    dropout_TCN = 0.15
     use_channel_attention = True  # 是否使用通道注意力机制
-    fixed_channel_weight = [0.7, 0.3, 0]  # 固定的通道注意力权重(None表示自适应学习)
+    fixed_channel_weight = [0.69, 0.3, 0.01]  # 固定的通道注意力权重(None表示自适应学习)
     ############################################################################################
     ############################################################################################
     
@@ -304,6 +431,63 @@ if __name__ == "__main__":
                     break # 跳出当前 Fold 的 Epoch 循环
 
         # --- 6.7 当前 Fold 训练结束 ---
+        print(f"  Fold {fold+1} 训练完成。正在使用最佳模型 (epoch {best_fold_epoch}) 进行详细评估...")
+
+        # --- 新增：加载最佳模型并执行详细评估 ---
+        best_fold_model_path = os.path.join(fold_run_dir, "best_mais_accu_model.pth")
+        if os.path.exists(best_fold_model_path):
+            # 重新加载最佳权重
+            model.load_state_dict(torch.load(best_fold_model_path))
+            
+            # 执行评估
+            predictions, ground_truths = evaluate_fold(model, val_loader_k, device)
+            
+            pred_hic, pred_dmax, pred_nij = predictions[:, 0], predictions[:, 1], predictions[:, 2]
+            true_hic, true_dmax, true_nij = ground_truths['regression'][:, 0], ground_truths['regression'][:, 1], ground_truths['regression'][:, 2]
+
+            # 计算分类指标 (复用 eval_model.py 的逻辑)
+            cls_metrics_head = get_classification_metrics(ground_truths['ais_head'], AIS_cal_head(pred_hic),  list(range(6)))
+            cls_metrics_chest = get_classification_metrics(ground_truths['ais_chest'], AIS_cal_chest(pred_dmax), [0, 2, 3, 4, 5])
+            cls_metrics_neck = get_classification_metrics(ground_truths['ais_neck'], AIS_cal_neck(pred_nij), [0, 2, 3, 4, 5])
+            
+            mais_pred = np.maximum.reduce([AIS_cal_head(pred_hic), AIS_cal_chest(pred_dmax), AIS_cal_neck(pred_nij)])
+            cls_metrics_mais = get_classification_metrics(ground_truths['mais'], mais_pred, [0, 1, 2, 3, 4, 5])
+            
+            # 绘制并保存图表 (保存到 fold_run_dir)
+            plot_scatter(true_hic, pred_hic, ground_truths['ais_head'], 
+                         f'Fold {fold+1} - Head Injury Criterion (HIC)', 'HIC', 
+                         os.path.join(fold_run_dir, "val_scatter_plot_HIC.png"))
+                         
+            plot_scatter(true_dmax, pred_dmax, ground_truths['ais_chest'], 
+                         f'Fold {fold+1} - Chest Displacement (Dmax)', 'Dmax (mm)', 
+                         os.path.join(fold_run_dir, "val_scatter_plot_Dmax.png"))
+                         
+            plot_scatter(true_nij, pred_nij, ground_truths['ais_neck'], 
+                         f'Fold {fold+1} - Neck Injury Criterion (Nij)', 'Nij', 
+                         os.path.join(fold_run_dir, "val_scatter_plot_Nij.png"))
+
+            plot_confusion_matrix(cls_metrics_mais['conf_matrix'], [0, 1, 2, 3, 4, 5], 
+                                  f'Fold {fold+1} - Confusion Matrix - MAIS (6C)', 
+                                  os.path.join(fold_run_dir, "val_cm_mais_6c.png"))
+
+            # (可选) 绘制其他混淆矩阵
+            plot_confusion_matrix(cls_metrics_head['conf_matrix'], [0, 1, 2, 3, 4, 5], 
+                                  f'Fold {fold+1} - Confusion Matrix - AIS Head (6C)', 
+                                  os.path.join(fold_run_dir, "val_cm_head_6c.png"))
+            
+            plot_confusion_matrix(cls_metrics_chest['conf_matrix'], [0, 2, 3, 4, 5], 
+                                  f'Fold {fold+1} - Confusion Matrix - AIS Chest (5C)', 
+                                  os.path.join(fold_run_dir, "val_cm_chest_5c.png"))
+            
+            plot_confusion_matrix(cls_metrics_neck['conf_matrix'], [0, 2, 3, 4, 5], 
+                                  f'Fold {fold+1} - Confusion Matrix - AIS Neck (5C)', 
+                                  os.path.join(fold_run_dir, "val_cm_neck_5c.png"))
+
+            print(f"  Fold {fold+1} 详细评估图表已保存至 {fold_run_dir}")
+
+        else:
+            print(f"  警告: 未找到 {best_fold_model_path}，跳过 Fold {fold+1} 的详细评估绘图。")
+        # --- 评估结束 ---
         writer.close() # 关闭当前 Fold 的 writer
         print(f"Fold {fold+1} finished in {time.time() - fold_start_time:.2f}s.")
         print(f"  Best Val MAIS Accuracy for Fold {fold+1}: {best_fold_mais_accu:.2f}% (at epoch {best_fold_epoch})")
